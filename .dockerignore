@@ -1,0 +1,7 @@
+.env
+.git
+.cursor
+data/*.json
+data/raw-runs/
+node_modules
+npm-debug.log*

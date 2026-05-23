@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Find Your Armenian</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #100f14;
+        color: #f6f1e8;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(235, 88, 58, 0.24), transparent 30rem),
+          radial-gradient(circle at top right, rgba(53, 102, 214, 0.18), transparent 28rem),
+          #100f14;
+      }
+
+      main {
+        width: min(1080px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 48px 0;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2.4rem, 7vw, 5.4rem);
+        letter-spacing: -0.08em;
+        line-height: 0.9;
+      }
+
+      .subtitle {
+        max-width: 720px;
+        color: #cfc7bc;
+        font-size: 1.12rem;
+        line-height: 1.6;
+      }
+
+      .panel,
+      .card {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.07);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+        border-radius: 24px;
+      }
+
+      .panel {
+        padding: 18px;
+        margin: 32px 0;
+      }
+
+      form {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+      }
+
+      input,
+      textarea,
+      select,
+      button {
+        border: 0;
+        border-radius: 16px;
+        font: inherit;
+      }
+
+      input,
+      textarea,
+      select {
+        background: rgba(0, 0, 0, 0.28);
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        padding: 14px 16px;
+      }
+
+      button {
+        cursor: pointer;
+        background: #ff5b36;
+        color: #180a05;
+        font-weight: 800;
+        padding: 14px 18px;
+      }
+
+      button.secondary {
+        background: rgba(255, 255, 255, 0.12);
+        color: #f6f1e8;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.65;
+      }
+
+      .controls,
+      .meta,
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .controls {
+        margin-top: 12px;
+        color: #cfc7bc;
+        font-size: 0.95rem;
+      }
+
+      .status {
+        margin: 16px 0;
+        color: #cfc7bc;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+        gap: 16px;
+      }
+
+      .card {
+        padding: 18px;
+      }
+
+      .card h2 {
+        margin: 0 0 6px;
+        font-size: 1.25rem;
+      }
+
+      .muted {
+        color: #cfc7bc;
+      }
+
+      .pill {
+        border-radius: 999px;
+        padding: 5px 10px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #f6f1e8;
+        font-size: 0.82rem;
+      }
+
+      .score {
+        background: rgba(255, 91, 54, 0.22);
+        color: #ffd6ca;
+      }
+
+      .evidence {
+        margin: 14px 0;
+        padding-left: 18px;
+        color: #e7ded1;
+      }
+
+      a {
+        color: #89b4ff;
+      }
+
+      textarea {
+        min-height: 72px;
+        resize: vertical;
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      @media (max-width: 720px) {
+        form {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="pill">Apify-powered Armenian network finder</p>
+      <h1>Find Your Armenian</h1>
+      <p class="subtitle">
+        Search for likely Armenian people at a company or in a role. The app caches every Apify result so future searches reuse what you already paid for.
+      </p>
+
+      <section class="panel">
+        <form id="search-form">
+          <input
+            id="query"
+            name="query"
+            placeholder="Find Armenians who work at OpenAI"
+            autocomplete="off"
+            required
+          />
+          <button id="search-button" type="submit">Search</button>
+        </form>
+        <div class="controls">
+          <label><input id="refresh" type="checkbox" /> Force live refresh</label>
+          <span id="config"></span>
+        </div>
+      </section>
+
+      <p id="status" class="status"></p>
+      <section id="results" class="grid"></section>
+
+      <h2>Saved Leads</h2>
+      <section id="leads" class="grid"></section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
