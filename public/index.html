@@ -28,10 +28,14 @@
       }
 
       h1 {
-        margin: 0;
-        font-size: clamp(2.4rem, 7vw, 5.4rem);
-        letter-spacing: -0.08em;
-        line-height: 0.9;
+        margin: 36px 0 28px;
+        text-align: center;
+        font-size: clamp(2.8rem, 6.5vw, 5.8rem);
+        letter-spacing: -0.018em;
+        line-height: 1.02;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-weight: 850;
+        text-wrap: balance;
       }
 
       .subtitle {
@@ -51,7 +55,8 @@
 
       .panel {
         padding: 18px;
-        margin: 32px 0;
+        margin: 0 auto 32px;
+        max-width: 880px;
       }
 
       form {
@@ -106,14 +111,188 @@
       }
 
       .controls {
-        margin-top: 12px;
         color: #cfc7bc;
         font-size: 0.95rem;
+      }
+
+      .top-tabs {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        margin: 0 auto 18px;
+      }
+
+      .tab-button {
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #cfc7bc;
+        padding: 10px 18px;
+      }
+
+      .tab-button.active {
+        background: #f6f1e8;
+        color: #17131b;
+      }
+
+      .tab-panel[hidden] {
+        display: none;
+      }
+
+      .mode-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .segmented {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        padding: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.28);
+      }
+
+      .mode-button {
+        border-radius: 999px;
+        padding: 9px 16px;
+        background: transparent;
+        color: #cfc7bc;
+        font-weight: 800;
+      }
+
+      .mode-button.active {
+        background: #f6f1e8;
+        color: #17131b;
       }
 
       .status {
         margin: 16px 0;
         color: #cfc7bc;
+      }
+
+      .jobs {
+        display: grid;
+        gap: 10px;
+        margin: 14px 0 18px;
+      }
+
+      .job-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        padding: 12px 14px;
+        background: rgba(255, 255, 255, 0.055);
+      }
+
+      .job-card strong {
+        display: block;
+      }
+
+      .job-card button {
+        padding: 9px 12px;
+        border-radius: 12px;
+      }
+
+      .trace {
+        margin: 16px 0 24px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 20px;
+        background: rgba(0, 0, 0, 0.24);
+        overflow: hidden;
+      }
+
+      .trace[hidden] {
+        display: none;
+      }
+
+      .trace summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 14px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-weight: 800;
+      }
+
+      .trace summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .trace-body {
+        padding: 0 16px 16px;
+        color: #e7ded1;
+      }
+
+      .trace-section {
+        padding: 14px 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .trace-section h3 {
+        margin: 0 0 10px;
+        font-size: 0.95rem;
+        color: #fff;
+      }
+
+      .trace-list {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .trace-list li {
+        margin: 8px 0;
+      }
+
+      .fun-status-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .fun-status-list li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 10px 0;
+        color: #cfc7bc;
+      }
+
+      .fun-status-list li.active {
+        color: #fff;
+        font-weight: 800;
+      }
+
+      .fun-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.22);
+        box-shadow: 0 0 0 rgba(255, 91, 54, 0);
+      }
+
+      .fun-status-list li.active .fun-dot {
+        background: #ff5b36;
+        box-shadow: 0 0 0 6px rgba(255, 91, 54, 0.16);
+      }
+
+      .trace-code {
+        white-space: pre-wrap;
+        word-break: break-word;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.08);
+        padding: 12px;
+        color: #d7e4ff;
+        font: 0.82rem ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       }
 
       .grid {
@@ -122,13 +301,85 @@
         gap: 16px;
       }
 
+      .result-group {
+        margin-top: 22px;
+      }
+
+      .result-group h2 {
+        margin: 0 0 12px;
+      }
+
+      .review-details {
+        margin-top: 22px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .review-details summary {
+        cursor: pointer;
+        padding: 14px 16px;
+        font-weight: 800;
+      }
+
+      .review-details .grid {
+        padding: 0 16px 16px;
+      }
+
+      .section-heading {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 28px 0 14px;
+      }
+
+      .section-heading h2 {
+        margin: 0;
+      }
+
+      .history-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+
+      .history-card {
+        text-align: left;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.06);
+        color: #f6f1e8;
+      }
+
+      .history-card strong {
+        display: block;
+        margin-bottom: 8px;
+        line-height: 1.25;
+      }
+
+      .history-card .muted {
+        font-size: 0.85rem;
+      }
+
       .card {
         padding: 18px;
+        min-height: 390px;
+        display: flex;
+        flex-direction: column;
+        position: relative;
       }
 
       .card h2 {
         margin: 0 0 6px;
         font-size: 1.25rem;
+        min-height: 3rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
       }
 
       .muted {
@@ -143,6 +394,16 @@
         font-size: 0.82rem;
       }
 
+      .pill-strong {
+        background: rgba(73, 207, 137, 0.18);
+        color: #c9f7dd;
+      }
+
+      .pill-possible {
+        background: rgba(255, 188, 87, 0.18);
+        color: #ffe1ad;
+      }
+
       .score {
         background: rgba(255, 91, 54, 0.22);
         color: #ffd6ca;
@@ -152,6 +413,77 @@
         margin: 14px 0;
         padding-left: 18px;
         color: #e7ded1;
+      }
+
+      .card-head {
+        min-height: 138px;
+      }
+
+      .card-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        gap: 12px;
+      }
+
+      .confidence-badge {
+        flex: 0 0 auto;
+      }
+
+      .headline {
+        min-height: 2.8rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .evidence-box {
+        min-height: 118px;
+        margin: 12px 0;
+        padding: 12px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.055);
+      }
+
+      .evidence-box ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .evidence-box li {
+        margin: 5px 0;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .outreach {
+        min-height: 3.2rem;
+        margin: 0 0 12px;
+        color: #f0e9dc;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .card-footer {
+        margin-top: auto;
+        display: grid;
+        gap: 10px;
+      }
+
+      .lead-form {
+        display: grid;
+        grid-template-columns: 1fr 1.25fr;
+        gap: 10px;
+      }
+
+      .lead-form button {
+        grid-column: 1 / -1;
+        justify-self: start;
       }
 
       a {
@@ -174,34 +506,61 @@
   </head>
   <body>
     <main>
-      <p class="pill">Apify-powered Armenian network finder</p>
       <h1>Find Your Armenian</h1>
-      <p class="subtitle">
-        Search for likely Armenian people at a company or in a role. The app caches every Apify result so future searches reuse what you already paid for.
-      </p>
 
-      <section class="panel">
-        <form id="search-form">
-          <input
-            id="query"
-            name="query"
-            placeholder="Find Armenians who work at OpenAI"
-            autocomplete="off"
-            required
-          />
-          <button id="search-button" type="submit">Search</button>
-        </form>
-        <div class="controls">
-          <label><input id="refresh" type="checkbox" /> Force live refresh</label>
-          <span id="config"></span>
+      <nav class="top-tabs" aria-label="Main tabs">
+        <button id="search-tab" class="tab-button active" type="button">Search</button>
+        <button id="contacts-tab" class="tab-button" type="button">Contacts</button>
+      </nav>
+
+      <section id="search-panel" class="tab-panel">
+        <section class="panel">
+          <form id="search-form">
+            <input
+              id="query"
+              name="query"
+              placeholder="Find Armenians who work at OpenAI"
+              autocomplete="off"
+              required
+            />
+            <button id="search-button" type="submit">Search</button>
+          </form>
+          <div class="mode-row">
+            <div class="segmented" aria-label="Search mode">
+              <button id="fast-mode" class="mode-button" type="button">Fast</button>
+              <button id="agent-mode" class="mode-button active" type="button">Agent</button>
+            </div>
+          <div class="controls">
+            <label><input id="refresh" type="checkbox" /> Ignore cached tool results</label>
+          </div>
+          </div>
+        </section>
+
+        <p id="status" class="status"></p>
+        <section id="jobs" class="jobs"></section>
+        <details id="agent-trace" class="trace" hidden>
+          <summary>
+            <span>Agent Trace</span>
+            <span id="agent-trace-summary" class="muted"></span>
+          </summary>
+          <div id="agent-trace-body" class="trace-body"></div>
+        </details>
+        <section id="results" class="grid"></section>
+
+        <div class="section-heading">
+          <h2>History</h2>
+          <span class="muted">Recent searches</span>
         </div>
+        <section id="history" class="history-grid"></section>
       </section>
 
-      <p id="status" class="status"></p>
-      <section id="results" class="grid"></section>
-
-      <h2>Saved Leads</h2>
-      <section id="leads" class="grid"></section>
+      <section id="contacts-panel" class="tab-panel" hidden>
+        <div class="section-heading">
+          <h2>Saved Contacts</h2>
+          <span class="muted">People you marked for follow-up</span>
+        </div>
+        <section id="leads" class="grid"></section>
+      </section>
     </main>
 
     <script type="module" src="/app.js"></script>

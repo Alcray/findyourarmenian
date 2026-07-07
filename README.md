@@ -2,21 +2,23 @@
 
 A minimal hackathon app for finding likely Armenian people by company, role, or location. It uses Apify for web/profile discovery, stores every run locally, and ranks candidates with transparent evidence instead of claiming identity with certainty.
 
-## Why Not LangChain Yet?
+## Agent Flow
 
-For this MVP, the agent is built from scratch as a small deterministic pipeline:
+The experiment branch runs a LangGraph agent:
 
-1. Parse the user query.
-2. Expand it into Apify search queries.
-3. For company searches, run the LinkedIn Company Employees actor first.
-4. Check the local cache.
-5. Run Apify only on cache misses or forced refresh.
-6. Normalize profiles.
-7. Ask Gemini to strictly validate/rerank candidates when a Gemini key is configured.
-8. Score Armenian/company/role/location evidence.
-9. Save leads and notes.
+1. Check the exact-query cache.
+2. Run a LangGraph agent with a contact-cache lookup node.
+3. Ask Gemini 3.5 Flash to produce a bounded search plan.
+4. Execute only allowed LangChain tools from that plan.
+5. Discover Apify MCP tools for agent context and future tool expansion.
+6. For company searches, run the LinkedIn Company Employees actor first.
+7. Use RAG Web Browser for location, role, school, and open-ended searches.
+8. Run Apify only on cache misses or forced refresh.
+9. Normalize profiles.
+10. Ask Gemini to strictly validate/rerank candidates when a Gemini key is configured.
+11. Save contacts, evidence, leads, and notes.
 
-This is better for the hackathon because it is tiny, inspectable, Docker-friendly on Jetson Orin Nano, and has zero npm dependencies. LangChain can be added later if the app needs tool routing, multi-step memory, or LLM-based extraction.
+This keeps the app agentic without making it reckless. Gemini decides the search strategy, LangGraph controls the workflow, and LangChain tools execute only approved actions with caching, tool limits, cost control, dedupe, and hard filters.
 
 ## Local Run
 
@@ -53,8 +55,9 @@ APIFY_REQUEST_TIMEOUT_MS=300000
 APIFY_COMPANY_EMPLOYEES_ACTOR=george.the.developer/linkedin-company-employees-scraper
 APIFY_COMPANY_MAX_EMPLOYEES=25
 APIFY_SEARCH_ACTOR=apify/rag-web-browser
+APIFY_MCP_URL=https://mcp.apify.com/?tools=actors,docs,apify/rag-web-browser,george.the.developer/linkedin-company-employees-scraper
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.5-flash
 GEMINI_API_BASE=https://aiplatform.googleapis.com/v1/publishers/google/models
 GEMINI_ENABLED=true
 ```
@@ -70,6 +73,7 @@ Modes:
 Runtime data is written under `data/` and ignored by git:
 
 - `data/raw-runs/`: raw Apify outputs keyed by actor/input hash.
+- `data/contacts.json`: durable contact intelligence cache with aliases, evidence, sources, and last matched query.
 - `data/profiles.json`: normalized people profiles.
 - `data/searches.json`: user query history and result IDs.
 - `data/leads.json`: saved lead status and notes.
