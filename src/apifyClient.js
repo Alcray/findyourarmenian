@@ -28,7 +28,7 @@ function inputForActor(actorId, query, limit) {
 function companyEmployeesInput(intent, limit) {
   return {
     companies: [intent.company],
-    searchQuery: intent.wantsArmenian ? 'Armenian OR Armenia OR Yerevan' : '',
+    searchQuery: intent.wantsArmenian ? 'Armenian OR "Armenian language" OR "Armenian-American" OR Hayastan' : '',
     targetTitles: targetTitlesForRole(intent.role),
     location: intent.location || '',
     profileDepth: 'short',

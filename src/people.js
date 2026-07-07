@@ -22,19 +22,42 @@ const ARMENIAN_FIRST_NAMES = new Set([
   'vahe',
 ]);
 
-const ARMENIAN_TERMS = [
+const ARMENIAN_IDENTITY_TERMS = [
   'armenian',
+  'armenian-american',
+  'armenian american',
+  'armenian language',
+  'speaks armenian',
+  'native or bilingual armenian',
+  'armenian community',
+  'armenian diaspora',
+  'hayastan',
+];
+
+const ARMENIAN_CONTEXT_TERMS = [
   'armenia',
   'yerevan',
   'gyumri',
   'artsakh',
-  'hayastan',
   'aua',
   'american university of armenia',
   'tumo',
   'picsart',
   'synopsys armenia',
 ];
+
+const NON_ARMENIAN_SURNAME_FALSE_POSITIVES = new Set([
+  'yan',
+  'ian',
+  'chan',
+  'chen',
+  'yuan',
+  'yang',
+  'yeung',
+  'ryan',
+  'bryan',
+  'christian',
+]);
 
 const ROLE_PATTERNS = [
   ['sales', /\b(sales|gtm|go.to.market|account executive|business development)\b/i],
@@ -48,7 +71,6 @@ const ROLE_PATTERNS = [
 
 export function parseIntent(query) {
   const clean = query.trim();
-  const lower = clean.toLowerCase();
   const role = ROLE_PATTERNS.find(([, pattern]) => pattern.test(clean))?.[0] || '';
   const location = extractLocation(clean);
   const company = extractCompany(clean, role);
@@ -58,7 +80,9 @@ export function parseIntent(query) {
     company,
     role,
     location,
-    wantsArmenian: lower.includes('armen') || true,
+    // This app always searches for Armenian people, even if the user only says
+    // "find people at Google sales".
+    wantsArmenian: true,
   };
 }
 
@@ -66,9 +90,9 @@ export function buildSearchQueries(intent) {
   const parts = [intent.company, intent.role, intent.location].filter(Boolean);
   const target = parts.join(' ');
   const queries = [
-    `site:linkedin.com/in ${target} Armenian Armenia Yerevan`,
-    `${target} Armenian LinkedIn profile`,
-    `${target} Armenia Yerevan founder engineer sales`,
+    `site:linkedin.com/in ${target} Armenian "Armenian language"`,
+    `${target} Armenian diaspora LinkedIn profile`,
+    `${target} "Armenian-American" Armenian founder engineer sales`,
   ];
 
   return [...new Set(queries.map((query) => query.replace(/\s+/g, ' ').trim()))].slice(0, 3);
@@ -134,7 +158,10 @@ function normalizeItem(item, intent, sourceQuery, metadata) {
   const name = looksLikeName(employeeName) ? employeeName : extractName(title, primaryUrl);
   if (!name || isLowQualityTitle(name)) return [];
 
-  const company = extractCompanyFromText(title, content) || companyFromEmployeeItem(item, metadata);
+  const explicitCompany = extractCompanyFromText(title, content);
+  const itemCompany = companyFromEmployeeItem(item, metadata, content);
+  const company = explicitCompany || itemCompany;
+  const affiliationVerified = Boolean(explicitCompany) || hasVerifiedCompanyItem(item, metadata, content);
   const headline = cleanHeadline(title, content);
   const location = extractLocation(content) || intent.location || '';
 
@@ -147,17 +174,22 @@ function normalizeItem(item, intent, sourceQuery, metadata) {
       role: inferRole(headline, intent.role),
       location,
       profileUrl: primaryUrl,
+      needsVerification: item.source === 'google-serp-unverified' && item.confidence === 'low',
       sources: [
         {
           url: primaryUrl,
           title: title || name,
           snippet: firstSentence(searchSummary || profileContent),
+          context: contextWindow(searchSummary || profileContent),
           query: sourceQuery,
           actorId: metadata.actorId,
           cached: metadata.cached,
           demo: Boolean(item.demo || metadata.demo),
           kind: metadata.kind || 'web-search',
           targetCompany: metadata.targetCompany || '',
+          affiliationVerified,
+          sourceConfidence: item.confidence || '',
+          sourceType: item.source || '',
         },
       ],
       evidence: [],
@@ -214,16 +246,26 @@ function armenianEvidence(candidate, evidence) {
     evidence.push({ type: 'name', text: `First name has Armenian signal: ${candidate.name}` });
   }
 
-  if (/(ian|yan|ian$|yan$|uni|ents|yants)$/i.test(lastName) && !['ryan', 'bryan', 'christian'].includes(lastName)) {
+  if (hasArmenianSurnameSignal(lastName)) {
     score += 24;
     evidence.push({ type: 'name', text: `Surname has common Armenian ending: ${candidate.name}` });
   }
 
-  for (const term of ARMENIAN_TERMS) {
+  for (const term of ARMENIAN_IDENTITY_TERMS) {
     if (searchable.includes(term)) {
-      score += term === 'armenian' || term === 'armenia' ? 25 : 14;
+      score += 28;
       evidence.push({ type: 'source', text: `Source mentions ${term}` });
       break;
+    }
+  }
+
+  if (!evidence.some((item) => item.type === 'source')) {
+    for (const term of ARMENIAN_CONTEXT_TERMS) {
+      if (searchable.includes(term)) {
+        score += 10;
+        evidence.push({ type: 'source', text: `Source has Armenia-linked context: ${term}` });
+        break;
+      }
     }
   }
 
@@ -237,8 +279,11 @@ function mentions(candidate, value) {
 
 function hasTargetCompanyEvidence(candidate, company) {
   const target = company.toLowerCase();
-  if (candidate.company && candidate.company.toLowerCase() === target) return true;
-  if ((candidate.sources || []).some((source) => source.kind === 'company-employees' && source.targetCompany?.toLowerCase() === target)) {
+  if (
+    candidate.company &&
+    candidate.company.toLowerCase() === target &&
+    (candidate.sources || []).some((source) => source.affiliationVerified)
+  ) {
     return true;
   }
 
@@ -305,6 +350,12 @@ function extractLocation(text) {
   const locations = [
     ['San Francisco', /\b(sf|san francisco)\b/i],
     ['Bay Area', /\b(bay area|silicon valley)\b/i],
+    ['Santa Clara', /\bsanta clara\b/i],
+    ['San Jose', /\bsan jose\b/i],
+    ['Palo Alto', /\bpalo alto\b/i],
+    ['Mountain View', /\bmountain view\b/i],
+    ['Sunnyvale', /\bsunnyvale\b/i],
+    ['Cupertino', /\bcupertino\b/i],
     ['Yerevan', /\byerevan\b/i],
     ['Armenia', /\barmenia\b/i],
     ['New York', /\b(new york|nyc)\b/i],
@@ -373,6 +424,10 @@ function firstSentence(value) {
   return textOf(value).replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0]?.slice(0, 240) || '';
 }
 
+function contextWindow(value) {
+  return textOf(value).replace(/\s+/g, ' ').slice(0, 1800);
+}
+
 function identityKey(name, company, url) {
   const linkedIn = url?.match(/linkedin\.com\/in\/[^/?#]+/i)?.[0].toLowerCase();
   return linkedIn || `${name}:${company}`.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -404,13 +459,48 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function companyFromEmployeeItem(item, metadata) {
+function companyFromEmployeeItem(item, metadata, content) {
   const value =
     item.companyName ||
     item.company ||
     item.currentCompany ||
     item.organization ||
-    metadata.targetCompany ||
     '';
+  if (!value) return '';
+
+  // Some Apify employee actors fall back to Google SERP and return low-confidence
+  // profiles that merely mention the target company. Do not turn that target
+  // company into a verified current employer unless the profile text supports it.
+  if (item.source === 'google-serp-unverified' && item.confidence === 'low') {
+    const target = metadata.targetCompany || value;
+    return hasCompanyTextEvidence(content, target) ? tidyCompany(textOf(value), '') : '';
+  }
+
   return tidyCompany(textOf(value), '');
+}
+
+function hasVerifiedCompanyItem(item, metadata, content) {
+  const value = item.companyName || item.company || item.currentCompany || item.organization || '';
+  if (!value) return false;
+  if (item.source === 'google-serp-unverified' && item.confidence === 'low') {
+    return hasCompanyTextEvidence(content, metadata.targetCompany || value);
+  }
+  return true;
+}
+
+function hasCompanyTextEvidence(content, company) {
+  if (!company) return false;
+  const escaped = escapeRegExp(company);
+  return [
+    new RegExp(`\\b(?:experience|current|works?|working)\\s*:?\\s*(?:at|@)?\\s*${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:at|@)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b${escaped}\\s*[·|,-]\\s*(?:engineering|sales|product|research|gtm|ai|ml|software|labs?)\\b`, 'i'),
+    new RegExp(`\\b[A-Z][A-Za-z'.-]+(?:\\s+[A-Z][A-Za-z'.-]+){1,3}\\s+-\\s+${escaped}\\b`, 'i'),
+  ].some((pattern) => pattern.test(content));
+}
+
+function hasArmenianSurnameSignal(lastName) {
+  const normalized = lastName.toLowerCase().replace(/[^a-z]/g, '');
+  if (normalized.length < 5 || NON_ARMENIAN_SURNAME_FALSE_POSITIVES.has(normalized)) return false;
+  return /(ian|yan|uni|ents|yants)$/.test(normalized);
 }

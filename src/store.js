@@ -4,6 +4,7 @@ import path from 'node:path';
 import { config } from './config.js';
 
 const paths = {
+  contacts: path.join(config.dataDir, 'contacts.json'),
   profiles: path.join(config.dataDir, 'profiles.json'),
   searches: path.join(config.dataDir, 'searches.json'),
   leads: path.join(config.dataDir, 'leads.json'),
@@ -67,6 +68,73 @@ export async function listProfiles() {
   return readJson(paths.profiles, []);
 }
 
+export async function listContacts() {
+  return readJson(paths.contacts, []);
+}
+
+export async function searchContacts(intent) {
+  const contacts = await listContacts();
+  const queryParts = [
+    intent.company,
+    intent.role,
+    intent.location,
+    ...(intent.locationAlternates || []),
+    intent.originalQuery,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+
+  return contacts
+    .map((contact) => ({
+      ...contact,
+      cacheScore: contactCacheScore(contact, queryParts, intent),
+    }))
+    .filter((contact) => contact.cacheScore > 0)
+    .sort((a, b) => b.cacheScore - a.cacheScore)
+    .slice(0, 20);
+}
+
+export async function upsertContactsFromProfiles(profiles, context = {}) {
+  const contacts = await listContacts();
+  const byKey = new Map(contacts.map((contact) => [contact.identityKey, contact]));
+  const saved = [];
+
+  for (const profile of profiles) {
+    const existing = byKey.get(profile.identityKey);
+    const contact = {
+      ...(existing || {}),
+      id: existing?.id || profile.id || `contact_${hashValue(profile.identityKey)}`,
+      identityKey: profile.identityKey,
+      name: profile.name,
+      headline: profile.headline || existing?.headline || '',
+      company: profile.company || existing?.company || '',
+      role: profile.role || existing?.role || '',
+      location: profile.location || existing?.location || '',
+      profileUrl: profile.profileUrl || existing?.profileUrl || '',
+      aliases: mergeStrings(existing?.aliases || [], [profile.name]),
+      tags: mergeStrings(existing?.tags || [], [
+        profile.company,
+        profile.role,
+        profile.location,
+        context.query,
+      ]),
+      sources: mergeByUrl(existing?.sources || [], profile.sources || []),
+      evidence: mergeEvidence(existing?.evidence || [], profile.evidence || []),
+      confidence: Math.max(existing?.confidence || 0, profile.confidence || 0),
+      confidenceLabel: profile.confidenceLabel || existing?.confidenceLabel || '',
+      lastMatchedQuery: context.query || existing?.lastMatchedQuery || '',
+      updatedAt: nowIso(),
+      createdAt: existing?.createdAt || nowIso(),
+    };
+
+    byKey.set(contact.identityKey, contact);
+    saved.push(contact);
+  }
+
+  await writeJson(paths.contacts, [...byKey.values()]);
+  return saved;
+}
+
 export async function upsertProfiles(candidates) {
   const profiles = await listProfiles();
   const byKey = new Map(profiles.map((profile) => [profile.identityKey, profile]));
@@ -116,9 +184,65 @@ function mergeEvidence(left, right) {
   });
 }
 
+function mergeStrings(left, right) {
+  return [...new Set([...left, ...right].filter(Boolean).map((value) => String(value)))];
+}
+
+function contactCacheScore(contact, queryParts, intent) {
+  if (intent.company && contact.company?.toLowerCase() !== String(intent.company).toLowerCase()) {
+    return 0;
+  }
+  if (intent.company && !hasVerifiedContactCompanyEvidence(contact, intent.company)) {
+    return 0;
+  }
+
+  const haystack = [
+    contact.name,
+    contact.headline,
+    contact.company,
+    contact.role,
+    contact.location,
+    ...(contact.aliases || []),
+    ...(contact.tags || []),
+    ...(contact.evidence || []).map((item) => item.text),
+    ...(contact.sources || []).map((source) => `${source.title} ${source.snippet}`),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  let score = 0;
+  for (const part of queryParts) {
+    if (part && haystack.includes(part)) score += 10;
+  }
+  if (intent.company && contact.company?.toLowerCase() === String(intent.company).toLowerCase()) score += 30;
+  if (intent.location && contact.location?.toLowerCase().includes(String(intent.location).toLowerCase())) score += 15;
+  if (/(armenian|armenia|yerevan|yan|ian)/i.test(haystack)) score += 10;
+  return score;
+}
+
+function hasVerifiedContactCompanyEvidence(contact, company) {
+  const target = String(company).toLowerCase();
+  if (contact.company?.toLowerCase() !== target) return false;
+
+  return (contact.sources || []).some((source) => {
+    if (source.kind === 'contact-cache') return false;
+    if (source.affiliationVerified) return true;
+    const text = `${source.title || ''} ${source.snippet || ''}`.toLowerCase();
+    return text.includes(target);
+  });
+}
+
 export async function getSearch(searchKey) {
   const searches = await readJson(paths.searches, []);
   return searches.find((search) => search.searchKey === searchKey) || null;
+}
+
+export async function listSearches() {
+  const searches = await readJson(paths.searches, []);
+  return searches
+    .slice()
+    .sort((a, b) => (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''));
 }
 
 export async function saveSearch(search) {

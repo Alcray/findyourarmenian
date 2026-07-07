@@ -14,6 +14,7 @@ process.env.GEMINI_ENABLED = 'false';
 const { demoItemsForQuery } = await import('./demoData.js');
 const { buildSearchQueries, normalizeCandidates, parseIntent } = await import('./people.js');
 const { searchPeople } = await import('./agent.js');
+const { planSearchWithGemini } = await import('./geminiClient.js');
 
 const intent = parseIntent(query);
 assert.equal(intent.company, 'OpenAI');
@@ -48,6 +49,46 @@ const falseOpenAiCandidates = normalizeCandidates(
 );
 assert.equal(falseOpenAiCandidates.length, 0);
 
+const yanFalsePositiveCandidates = normalizeCandidates(
+  [
+    {
+      searchResult: {
+        title: 'Anna Yan - Anthropic',
+        description: 'Experience: Anthropic · Location: San Francisco Bay Area.',
+        url: 'https://www.linkedin.com/in/annayan20',
+      },
+      text: 'Anna Yan San Francisco Bay Area Anthropic New York University.',
+    },
+  ],
+  { ...intent, company: 'Anthropic', location: '' },
+  'site:linkedin.com/in Anthropic Armenian',
+  { actorId: 'apify/rag-web-browser' },
+);
+assert.equal(yanFalsePositiveCandidates.length, 1);
+assert.ok(yanFalsePositiveCandidates[0].confidence < 40);
+
+const unverifiedCompanyActorCandidates = normalizeCandidates(
+  [
+    {
+      fullName: 'Stefan Papp',
+      headline: 'Data Professional and Strategy',
+      company: 'Anthropic',
+      source: 'google-serp-unverified',
+      confidence: 'low',
+      snippet: 'Stefan Papp - Data Professional and Strategy LinkedIn',
+      profileUrl: 'https://www.linkedin.com/in/stefanpapp/',
+    },
+  ],
+  { ...intent, company: 'Anthropic', location: '' },
+  'company employees: Anthropic',
+  {
+    actorId: 'george.the.developer/linkedin-company-employees-scraper',
+    kind: 'company-employees',
+    targetCompany: 'Anthropic',
+  },
+);
+assert.equal(unverifiedCompanyActorCandidates.length, 0);
+
 const employeeActorCandidates = normalizeCandidates(
   [
     {
@@ -69,10 +110,25 @@ const employeeActorCandidates = normalizeCandidates(
 assert.equal(employeeActorCandidates.length, 1);
 assert.equal(employeeActorCandidates[0].company, 'OpenAI');
 
+const santaClaraIntent = parseIntent('find Armenian AI founders in Santa Clara');
+assert.equal(santaClaraIntent.location, 'Santa Clara');
+const santaClaraPlan = await planSearchWithGemini('find Armenian AI founders in Santa Clara', santaClaraIntent);
+assert.equal(santaClaraPlan.plan.intent.searchType, 'location');
+assert.ok(santaClaraPlan.plan.steps.some((step) => step.query.includes('Santa Clara')));
+assert.ok(santaClaraPlan.plan.steps.some((step) => step.query.includes('Bay Area')));
+
+const implicitArmenianIntent = parseIntent('find people who work at Google in Bay Area');
+assert.equal(implicitArmenianIntent.wantsArmenian, true);
+const implicitQueries = buildSearchQueries(implicitArmenianIntent).join(' ');
+assert.ok(implicitQueries.includes('Armenian'));
+assert.ok(implicitQueries.includes('Armenian language') || implicitQueries.includes('Armenian-American'));
+
 const firstSearch = await searchPeople({ query, limit: 5 });
 const secondSearch = await searchPeople({ query, limit: 5 });
 assert.equal(firstSearch.cached, false);
-assert.equal(secondSearch.cached, true);
+assert.equal(secondSearch.cached, false);
+assert.equal(secondSearch.queryCacheEnabled, false);
+assert.ok(secondSearch.runs.some((run) => run.cached));
 assert.equal(firstSearch.results.length, secondSearch.results.length);
 
 console.log('Validation passed: parser, query builder, normalization, scoring, and cache reuse are working.');
