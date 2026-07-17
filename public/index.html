@@ -527,8 +527,8 @@
           </form>
           <div class="mode-row">
             <div class="segmented" aria-label="Search mode">
-              <button id="fast-mode" class="mode-button" type="button">Fast</button>
-              <button id="agent-mode" class="mode-button active" type="button">Agent</button>
+              <button id="fast-mode" class="mode-button" type="button" title="Cheap: fewer sources, short profiles">Fast</button>
+              <button id="agent-mode" class="mode-button active" type="button" title="Best results, cost no object: surname sweep, full profiles, enrichment, planning">Quality</button>
             </div>
           <div class="controls">
             <label><input id="refresh" type="checkbox" /> Ignore cached tool results</label>
@@ -556,10 +556,14 @@
 
       <section id="contacts-panel" class="tab-panel" hidden>
         <div class="section-heading">
-          <h2>Saved Contacts</h2>
-          <span class="muted">People you marked for follow-up</span>
+          <h2>Your Armenian Network</h2>
+          <span id="contacts-count" class="muted">Everyone found so far — grows with every search</span>
         </div>
-        <section id="leads" class="grid"></section>
+        <form id="contacts-search-form" class="panel" style="margin-bottom:18px">
+          <input id="contacts-search" name="q" placeholder="Search the list by name, company, role, or location" autocomplete="off" />
+          <button type="submit">Search list</button>
+        </form>
+        <section id="contacts" class="grid"></section>
       </section>
     </main>
 

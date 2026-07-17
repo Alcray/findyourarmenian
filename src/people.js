@@ -1,26 +1,76 @@
 import { hashValue } from './store.js';
 
+// Distinctive Armenian given names. Ambiguous international names (David, Karen,
+// Maria, Anna, Robert) are deliberately excluded so a first name alone never
+// creates a false positive. Matching adds a small signal (+12), never decisive.
 const ARMENIAN_FIRST_NAMES = new Set([
-  'ani',
-  'aram',
-  'armen',
-  'armine',
-  'armin',
-  'artak',
-  'artur',
-  'davit',
-  'gevorg',
-  'gor',
-  'hayk',
-  'lilit',
-  'lusine',
-  'narek',
-  'narine',
-  'sargis',
-  'tigran',
-  'vahagn',
-  'vahe',
+  'aram', 'armen', 'arman', 'artak', 'artur', 'ashot', 'davit', 'edgar', 'gagik', 'garik',
+  'gevorg', 'gor', 'grigor', 'hakob', 'hayk', 'hovhannes', 'hovik', 'levon', 'mher', 'narek',
+  'nver', 'poghos', 'rafayel', 'razmik', 'ruben', 'samvel', 'sargis', 'sarkis', 'sevak',
+  'suren', 'tigran', 'vahagn', 'vahe', 'vahan', 'vardan', 'vazgen', 'vigen', 'zaven', 'arsen',
+  'areg', 'tatul', 'ani', 'anahit', 'armine', 'arpine', 'astghik', 'gayane', 'gohar', 'hasmik',
+  'hermine', 'lilit', 'lusine', 'mane', 'mariam', 'meline', 'nairi', 'nane', 'narine', 'nvard',
+  'ruzan', 'satenik', 'shushan', 'siranush', 'sona', 'tatevik', 'zaruhi', 'nune',
 ]);
+
+// Curated high-frequency Armenian surnames (Eastern + Western/diaspora spellings).
+// These rarely collide with other ethnicities, so an exact match is a strong signal (+30).
+const COMMON_ARMENIAN_SURNAMES = new Set([
+  'hakobyan', 'sargsyan', 'harutyunyan', 'grigoryan', 'khachatryan', 'vardanyan', 'petrosyan',
+  'karapetyan', 'manukyan', 'hovhannisyan', 'stepanyan', 'markaryan', 'mkrtchyan', 'sahakyan',
+  'avetisyan', 'ghazaryan', 'minasyan', 'simonyan', 'gasparyan', 'davtyan', 'melkonyan',
+  'arakelyan', 'galstyan', 'babayan', 'kirakosyan', 'martirosyan', 'poghosyan', 'sedrakyan',
+  'tumanyan', 'asatryan', 'aslanyan', 'baghdasaryan', 'danielyan', 'mnatsakanyan', 'nersisyan',
+  'gevorgyan', 'nazaryan', 'tonoyan', 'zokhrabyan', 'ambartsumyan', 'hambardzumyan',
+  'kardashian', 'sarkisian', 'sarkissian', 'mardirosian', 'hovsepian', 'boghossian',
+  'kasparian', 'arakelian', 'tashjian', 'ohanian', 'derderian', 'hagopian', 'manoogian',
+  'mouradian', 'kevorkian', 'krikorian', 'bedrosian', 'gulbenkian', 'terzian', 'avakian',
+]);
+
+// Never treat these as Armenian even though they end in -ian/-yan.
+const WESTERN_GIVEN_NAMES_ENDING_IAN = new Set([
+  'brian', 'sebastian', 'julian', 'adrian', 'damian', 'dorian', 'killian', 'kilian', 'fabian',
+  'florian', 'lucian', 'marian', 'gillian', 'lillian', 'vivian', 'cristian', 'kristian', 'christian',
+  'maximilian', 'bastian', 'demian', 'aurelian', 'cyprian', 'bryan', 'ryan', 'yan', 'ian',
+]);
+
+// Persian given names: an -ian surname beside one of these is Persian, not Armenian.
+const PERSIAN_FIRST_NAMES = new Set([
+  'reza', 'ali', 'mohammad', 'mohammed', 'hossein', 'hosein', 'amir', 'mehdi', 'hassan', 'hasan',
+  'kazem', 'ebrahim', 'ibrahim', 'saeed', 'said', 'majid', 'vahid', 'farhad', 'kamran', 'arash',
+  'babak', 'siamak', 'nima', 'pouya', 'pedram', 'omid', 'nader', 'bahram', 'jamshid', 'kaveh',
+  'dariush', 'maryam', 'fatemeh', 'zahra', 'shirin', 'nasrin', 'parisa', 'laleh',
+]);
+
+// Chinese pinyin surnames: an -ian/-yan token beside one is a Chinese given name.
+const CHINESE_SURNAMES = new Set([
+  'li', 'zhang', 'wang', 'liu', 'chen', 'yang', 'huang', 'zhao', 'zhou', 'sun', 'zhu',
+  'guo', 'lin', 'gao', 'luo', 'zheng', 'liang', 'xie', 'tang', 'deng', 'feng',
+  'cao', 'peng', 'zeng', 'xiao', 'tian', 'dong', 'yuan', 'pan', 'cai', 'jiang',
+  'chan', 'chang', 'yuen', 'yeung', 'shen', 'song', 'han', 'yao', 'ding', 'du',
+  'wan', 'kong', 'fang', 'jin', 'cui', 'shi', 'qin', 'hou', 'bai', 'cheng',
+  'wei', 'lu', 'yu', 'ye', 'ren', 'wu', 'he', 'ma', 'hu', 'guo',
+]);
+
+const ARMENIAN_SURNAME_STRONG = 30;
+const ARMENIAN_SURNAME_MEDIUM = 20;
+const ARMENIAN_SURNAME_WEAK = 12;
+
+// Surname batches used to build recall-boosting search queries (site: ... (A OR B ...)).
+// Each batch becomes one web query; quality mode runs several to widen coverage.
+// Batch 0 is kept stable (order + members) so cached fixtures / the bench still hit.
+export const ARMENIAN_SURNAME_QUERY_BATCHES = [
+  ['Hakobyan', 'Sargsyan', 'Grigoryan', 'Harutyunyan', 'Petrosyan', 'Karapetyan',
+    'Vardanyan', 'Manukyan', 'Hovhannisyan', 'Khachatryan', 'Ghazaryan', 'Sarkisian'],
+  ['Martirosyan', 'Avetisyan', 'Stepanyan', 'Gevorgyan', 'Sahakyan', 'Melkonyan',
+    'Simonyan', 'Galstyan', 'Baghdasaryan', 'Nazaryan', 'Arakelyan', 'Minasyan'],
+  ['Mkrtchyan', 'Danielyan', 'Asatryan', 'Kirakosyan', 'Poghosyan', 'Tumanyan',
+    'Nersisyan', 'Gasparyan', 'Davtyan', 'Aslanyan', 'Babayan', 'Sedrakyan'],
+];
+
+// Flat list for the harvestapi surname sweep (iterates individual surnames).
+// First 12 match the old order so existing sweep cache keys still hit.
+export const ARMENIAN_SURNAME_QUERY_BATCH = ARMENIAN_SURNAME_QUERY_BATCHES.flat();
 
 const ARMENIAN_IDENTITY_TERMS = [
   'armenian',
@@ -34,30 +84,27 @@ const ARMENIAN_IDENTITY_TERMS = [
   'hayastan',
 ];
 
+// Weaker, Armenia-linked context (place, school, employer, org). Supporting evidence,
+// not proof of nationality on its own.
 const ARMENIAN_CONTEXT_TERMS = [
   'armenia',
   'yerevan',
   'gyumri',
   'artsakh',
+  'nagorno',
   'aua',
   'american university of armenia',
+  'yerevan state university',
   'tumo',
   'picsart',
+  'servicetitan',
   'synopsys armenia',
+  'agbu',
+  'birthright armenia',
+  'homenetmen',
+  'armenian apostolic',
+  'armenian church',
 ];
-
-const NON_ARMENIAN_SURNAME_FALSE_POSITIVES = new Set([
-  'yan',
-  'ian',
-  'chan',
-  'chen',
-  'yuan',
-  'yang',
-  'yeung',
-  'ryan',
-  'bryan',
-  'christian',
-]);
 
 const ROLE_PATTERNS = [
   ['sales', /\b(sales|gtm|go.to.market|account executive|business development)\b/i],
@@ -86,16 +133,24 @@ export function parseIntent(query) {
   };
 }
 
+// Query strategy is empirically tuned: the simple unquoted `site:linkedin.com/in
+// <target> Armenian` form returns real Armenians at the target company, while the
+// old multi-quoted form ("Armenian language" "Armenian-American") returned mostly
+// non-Armenians at the wrong company. Surname-OR batches only help open/location
+// recall, where there is no company to anchor affiliation.
 export function buildSearchQueries(intent) {
-  const parts = [intent.company, intent.role, intent.location].filter(Boolean);
-  const target = parts.join(' ');
-  const queries = [
-    `site:linkedin.com/in ${target} Armenian "Armenian language"`,
-    `${target} Armenian diaspora LinkedIn profile`,
-    `${target} "Armenian-American" Armenian founder engineer sales`,
-  ];
+  const target = [intent.company, intent.role, intent.location].filter(Boolean).join(' ').trim();
+  // One surname-OR query per batch. Google ORs surnames natively, so these catch
+  // Armenians who never write "Armenian" on their profile. The self-label query
+  // comes first; discovery runs as many of the rest as the mode allows.
+  const surnameBatches = ARMENIAN_SURNAME_QUERY_BATCHES.map((batch) => `(${batch.join(' OR ')})`);
+  const prefix = intent.company
+    ? `site:linkedin.com/in ${intent.company} ${[intent.role, intent.location].filter(Boolean).join(' ').trim()}`.trim()
+    : `site:linkedin.com/in ${target}`;
 
-  return [...new Set(queries.map((query) => query.replace(/\s+/g, ' ').trim()))].slice(0, 3);
+  const queries = [`${prefix} Armenian`, ...surnameBatches.map((sb) => `${prefix} ${sb}`)];
+
+  return [...new Set(queries.map((query) => query.replace(/\s+/g, ' ').trim()))].filter(Boolean).slice(0, 8);
 }
 
 export function normalizeCandidates(items, intent, sourceQuery, metadata = {}) {
@@ -108,19 +163,31 @@ export function normalizeCandidates(items, intent, sourceQuery, metadata = {}) {
 }
 
 function normalizeItem(item, intent, sourceQuery, metadata) {
+  // Structured actors (harvestapi/linkedin-profile-search, enrichment) return
+  // firstName/lastName + currentPositions[] instead of a flat title.
+  const structuredName = joinName(item.firstName, item.lastName);
+  const positions = Array.isArray(item.currentPositions) ? item.currentPositions : [];
+  const topPosition = positions[0] || {};
+  const positionTitle = textOf(topPosition.title || topPosition.position || topPosition.jobTitle || '');
+  const positionCompany = textOf(topPosition.companyName || topPosition.company || '');
+
   const title = textOf(
     item.title ||
       item.jobTitle ||
       item.position ||
       item.headline ||
+      positionTitle ||
       item.name ||
       item.fullName ||
+      structuredName ||
       item.heading ||
       item.searchResult?.title ||
       item.metadata?.title ||
       '',
   );
-  const employeeName = textOf(item.name || item.fullName || item.profileName || item.employeeName || '');
+  const employeeName = textOf(
+    item.name || item.fullName || structuredName || item.profileName || item.employeeName || '',
+  );
   const url = bestUrl(item);
   const searchSummary = [
     item.searchResult?.title,
@@ -134,12 +201,20 @@ function normalizeItem(item, intent, sourceQuery, metadata) {
   const profileContent = trimProfileNoise([
     title,
     item.description,
+    item.summary,
+    item.about,
     item.jobTitle,
     item.position,
     item.headline,
+    positionTitle,
     item.company,
     item.companyName,
-    item.location,
+    positionCompany,
+    typeof item.location === 'object' ? item.location?.linkedinText || item.location?.name : item.location,
+    ...positions.map((p) => [p.title, p.companyName || p.company].filter(Boolean).map(textOf).join(' at ')),
+    ...(Array.isArray(item.experience) ? item.experience.map((e) => textOf(e.title || e.company || e)) : []),
+    ...(Array.isArray(item.education) ? item.education.map((e) => textOf(e.schoolName || e.school || e)) : []),
+    ...(Array.isArray(item.skills) ? item.skills.map(textOf) : []),
     item.profileUrl,
     item.linkedinUrl,
     item.text,
@@ -242,13 +317,16 @@ function armenianEvidence(candidate, evidence) {
   let score = 0;
 
   if (ARMENIAN_FIRST_NAMES.has(firstName)) {
-    score += 12;
-    evidence.push({ type: 'name', text: `First name has Armenian signal: ${candidate.name}` });
+    score += ARMENIAN_SURNAME_WEAK;
+    evidence.push({ type: 'name', text: `First name is distinctively Armenian: ${candidate.name}` });
   }
 
-  if (hasArmenianSurnameSignal(lastName)) {
-    score += 24;
-    evidence.push({ type: 'name', text: `Surname has common Armenian ending: ${candidate.name}` });
+  const surnameScore = armenianSurnameScore(lastName, firstName);
+  if (surnameScore > 0) {
+    score += surnameScore;
+    const strength =
+      surnameScore >= ARMENIAN_SURNAME_STRONG ? 'strong' : surnameScore >= ARMENIAN_SURNAME_MEDIUM ? 'likely' : 'possible';
+    evidence.push({ type: 'name', text: `Surname is a ${strength} Armenian signal: ${candidate.name}` });
   }
 
   for (const term of ARMENIAN_IDENTITY_TERMS) {
@@ -288,7 +366,7 @@ function hasTargetCompanyEvidence(candidate, company) {
   }
 
   const sourceText = (candidate.sources || [])
-    .map((source) => `${source.title || ''}\n${source.snippet || ''}`)
+    .map((source) => `${source.title || ''}\n${source.snippet || ''}\n${(source.context || '').slice(0, 1200)}`)
     .join('\n');
   const escaped = escapeRegExp(company);
   return [
@@ -306,7 +384,11 @@ function searchableText(candidate) {
     candidate.company,
     candidate.role,
     candidate.location,
-    ...(candidate.sources || []).map((source) => `${source.title} ${source.snippet}`),
+    // Include the scraped/enriched body (context), capped to bound regex cost.
+    // Without this, the only evidence was a <=240-char snippet.
+    ...(candidate.sources || []).map(
+      (source) => `${source.title || ''} ${source.snippet || ''} ${(source.context || '').slice(0, 1200)}`,
+    ),
   ]
     .filter(Boolean)
     .join(' ')
@@ -465,6 +547,8 @@ function companyFromEmployeeItem(item, metadata, content) {
     item.company ||
     item.currentCompany ||
     item.organization ||
+    item.currentPositions?.[0]?.companyName ||
+    item.currentPositions?.[0]?.company ||
     '';
   if (!value) return '';
 
@@ -480,7 +564,14 @@ function companyFromEmployeeItem(item, metadata, content) {
 }
 
 function hasVerifiedCompanyItem(item, metadata, content) {
-  const value = item.companyName || item.company || item.currentCompany || item.organization || '';
+  const value =
+    item.companyName ||
+    item.company ||
+    item.currentCompany ||
+    item.organization ||
+    item.currentPositions?.[0]?.companyName ||
+    item.currentPositions?.[0]?.company ||
+    '';
   if (!value) return false;
   if (item.source === 'google-serp-unverified' && item.confidence === 'low') {
     return hasCompanyTextEvidence(content, metadata.targetCompany || value);
@@ -499,8 +590,61 @@ function hasCompanyTextEvidence(content, company) {
   ].some((pattern) => pattern.test(content));
 }
 
-function hasArmenianSurnameSignal(lastName) {
-  const normalized = lastName.toLowerCase().replace(/[^a-z]/g, '');
-  if (normalized.length < 5 || NON_ARMENIAN_SURNAME_FALSE_POSITIVES.has(normalized)) return false;
-  return /(ian|yan|uni|ents|yants)$/.test(normalized);
+// Tiered Armenian surname signal with disambiguation. Returns points, not a
+// boolean, so a curated surname (Hakobyan) outweighs a bare -ian ending (which
+// also appears in Persian, some Greek, and Western given names like "Julian").
+export function armenianSurnameScore(lastName, firstName = '') {
+  const s = String(lastName).toLowerCase().replace(/[^a-z]/g, '');
+  const first = String(firstName).toLowerCase().replace(/[^a-z]/g, '');
+  if (s.length < 5) return 0;
+
+  // Curated exact match always wins.
+  if (COMMON_ARMENIAN_SURNAMES.has(s)) return ARMENIAN_SURNAME_STRONG;
+
+  // The token itself is a Western given name or a Chinese surname → not Armenian.
+  if (WESTERN_GIVEN_NAMES_ENDING_IAN.has(s) || CHINESE_SURNAMES.has(s)) return 0;
+
+  // Persian surnames: -ian patronymics on Persian stems, and -zadeh/-nejad/-pour/-abadi roots.
+  if (/(hossein|hosein|bahram|tehran|rahim|karim|akbar|kazem|reza|mahmoud|ahmad|abdol|gholam|mirza|sultan|mohammad|mohamed)ian$/.test(s)) {
+    return 0;
+  }
+  if (/(zadeh|nejad|nezhad|pour|pur|abadi)$/.test(s)) return 0;
+
+  // Base tier from the suffix. -yan and its transliterations are the strongest
+  // Armenian signal; a bare -ian is more ambiguous; -ouni/-[iy]ents are weak.
+  let tier = 0;
+  if (/(yan|[iy]ants|[iy]antz|tsyan|dzyan)$/.test(s)) tier = ARMENIAN_SURNAME_STRONG;
+  else if (/ian$/.test(s)) tier = ARMENIAN_SURNAME_MEDIUM;
+  else if (/(ouni|[iy]ents)$/.test(s)) tier = ARMENIAN_SURNAME_WEAK;
+  if (!tier) return 0;
+
+  const armenianFirst = ARMENIAN_FIRST_NAMES.has(first);
+  if (armenianFirst) return tier;
+
+  // A bare (non-curated) -yan next to a Chinese given/family name is Chinese
+  // pinyin, e.g. "Li Xiaoyan" — kill it even at the strong tier. Persian first
+  // names do NOT trigger this: "Reza Aznavuryan" may be an Iranian-Armenian, so a
+  // strong -yan ending survives (only its weaker/ambiguous forms get downgraded).
+  if (CHINESE_SURNAMES.has(first)) return 0;
+  if (PERSIAN_FIRST_NAMES.has(first) && tier < ARMENIAN_SURNAME_STRONG) return 0;
+  return tier;
+}
+
+function joinName(first, last) {
+  return [first, last].map((part) => textOf(part).trim()).filter(Boolean).join(' ');
+}
+
+// Name-only Armenian signal (surname tier + distinctive first name), independent
+// of any profile/context text. Used by the metrics harness as a detector score.
+export function armenianNameScore(fullName) {
+  const parts = String(fullName || '')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return 0;
+  const first = parts[0];
+  const last = parts.at(-1);
+  let score = armenianSurnameScore(last, first);
+  if (ARMENIAN_FIRST_NAMES.has(first)) score += ARMENIAN_SURNAME_WEAK;
+  return score;
 }

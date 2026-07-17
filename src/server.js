@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { searchPeople, savedLeadsWithProfiles } from './agent.js';
 import { config, publicConfig } from './config.js';
 import { deleteSearchJob, getSearchJob, listSearchJobs, startSearchJob } from './searchJobs.js';
-import { getSearch, listLeads, listProfiles, listSearches, upsertLead } from './store.js';
+import { getSearch, listContactsWithLeads, listLeads, listProfiles, listSearches, upsertLead } from './store.js';
 
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -48,10 +48,12 @@ async function handleApi(req, res) {
         query: body.query,
         refresh: Boolean(body.refresh),
         limit: Number.parseInt(body.limit, 10) || config.apifyMaxResults,
-        mode: body.mode === 'fast' ? 'fast' : 'agent',
+        mode: body.mode === 'fast' ? 'fast' : 'quality',
       }),
-      120000,
-      'Search timed out after 120s. Try again with cached tool results or a narrower query.',
+      // Quality mode (surname sweep + enrichment) is intentionally slow; the UI
+      // uses the async /api/jobs path, so this sync cap is generous.
+      600000,
+      'Search timed out after 600s. Try fast mode or a narrower query.',
     );
     sendJson(res, 200, result);
     return;
@@ -63,7 +65,7 @@ async function handleApi(req, res) {
       query: body.query,
       refresh: Boolean(body.refresh),
       limit: Number.parseInt(body.limit, 10) || config.apifyMaxResults,
-      mode: body.mode === 'fast' ? 'fast' : 'agent',
+      mode: body.mode === 'fast' ? 'fast' : 'quality',
     });
     sendJson(res, 202, { job });
     return;
@@ -116,6 +118,12 @@ async function handleApi(req, res) {
       loadedFromHistory: true,
       results: hydrateResults(search.resultIds || [], profiles, leads),
     });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/contacts') {
+    const contacts = await listContactsWithLeads(url.searchParams.get('q') || '');
+    sendJson(res, 200, { contacts, total: contacts.length });
     return;
   }
 
@@ -190,7 +198,7 @@ function withTimeout(promise, timeoutMs, message) {
 function searchMode(search) {
   if (search.mode) return search.mode;
   if (search.agent?.framework === 'langchain-langgraph' || search.plan || search.agent?.planning || search.agent?.mcp) {
-    return 'agent';
+    return 'quality';
   }
   return 'fast';
 }

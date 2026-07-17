@@ -261,7 +261,7 @@ function formatSearchResult(result, parsed) {
     `Results: ${people.length}`,
   ];
 
-  const trace = result.mode === 'agent'
+  const trace = result.mode !== 'fast'
     ? [
         '',
         `Plan: ${(result.plan?.steps || []).map((step) => step.tool).join(' -> ') || 'n/a'}`,

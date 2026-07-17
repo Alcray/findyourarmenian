@@ -1,24 +1,34 @@
 # Find Your Armenian
 
-A minimal hackathon app for finding likely Armenian people by company, role, or location. It uses Apify for web/profile discovery, stores every run locally, and ranks candidates with transparent evidence instead of claiming identity with certainty.
+A people-search app for finding likely-Armenian people by company, role, or location. It uses Apify for discovery, Gemini for planning + validation, stores every run locally, and ranks candidates with transparent evidence instead of claiming identity with certainty.
 
-## Agent Flow
+## APIs it needs
 
-The experiment branch runs a LangGraph agent:
+| API | Required? | What it does | Notes |
+|-----|-----------|--------------|-------|
+| **Apify** | Yes | Discovers people (LinkedIn profile search, Google-SERP web search, optional roster scrape, profile enrichment) | `APIFY_TOKEN`. Free plan works (~$5/mo credit); a typical search costs ~$0.10–0.20. |
+| **Google Gemini** | Recommended | Plans the search and validates/reranks candidates | Vertex "Express" API keys (starting `AQ.`) work **only** via the `aiplatform.googleapis.com` publisher endpoint — the default. Without a key the pipeline still runs on deterministic heuristics. |
+| Telegram | Optional | Chat interface (`npm run bot`) | `TELEGRAM_BOT_TOKEN`. |
 
-1. Check the exact-query cache.
-2. Run a LangGraph agent with a contact-cache lookup node.
-3. Ask Gemini 3.5 Flash to produce a bounded search plan.
-4. Execute only allowed LangChain tools from that plan.
-5. Discover Apify MCP tools for agent context and future tool expansion.
-6. For company searches, run the LinkedIn Company Employees actor first.
-7. Use RAG Web Browser for location, role, school, and open-ended searches.
-8. Run Apify only on cache misses or forced refresh.
-9. Normalize profiles.
-10. Ask Gemini to strictly validate/rerank candidates when a Gemini key is configured.
-11. Save contacts, evidence, leads, and notes.
+## Pipeline
 
-This keeps the app agentic without making it reckless. Gemini decides the search strategy, LangGraph controls the workflow, and LangChain tools execute only approved actions with caching, tool limits, cost control, dedupe, and hard filters.
+Discovery combines multiple engines and merges the results (deduped by LinkedIn URL):
+
+1. **Structured LinkedIn people search** (`harvestapi/linkedin-profile-search`) — the primary engine. Filters by company / location / job title and biases toward Armenians. Highest precision.
+2. **Web search** (`apify/rag-web-browser`) — cheap Google-SERP queries of the form `site:linkedin.com/in <company/terms> Armenian`, plus surname-OR batches for open/location searches. Strong company-affiliation recall.
+3. **Company roster** (`george.the.developer/linkedin-company-employees-scraper`) — optional, off by default (most expensive); a broad roster then filtered locally.
+4. **Profile enrichment** (`anchor/linkedin-profile-enrichment`) — full bios for borderline candidates, so the LLM judge reasons over real evidence rather than a short snippet. Cost-capped.
+
+Candidates are then scored by a tiered Armenian-name model (curated surnames + suffix variants with Persian/Chinese/Western disambiguation), identity/community/location signals, and company-affiliation verification. If a Gemini key is set, Gemini reranks them with a numeric rubric and assigns display buckets. Everything is cached and saved as durable contacts, evidence, leads, and notes.
+
+### Modes
+
+Two modes trade quality against cost (set per search; **Quality is the default**):
+
+- **Quality** — best possible results, cost is not a constraint. Runs Gemini planning + reranking, pulls **full** LinkedIn bios, enriches borderline candidates, and does a **surname sweep**: extra `harvestapi` passes filtered by the top Armenian surnames (`lastNames[]`) so it finds Armenians who never write "Armenian" on their profile — the biggest recall gap. Uses the strongest model (`gemini-3.5-flash`), generous timeouts, and retries the flaky LinkedIn scraper. Costs ~$1+ per company search (the sweep is ~$0.10/surname); tune with `APIFY_SURNAME_SEED_COUNT`.
+- **Fast** — a cheap preview: short profiles, no surname sweep, no enrichment, no planning, tight timeouts.
+
+Both surface an auditable trace (plan, tool runs, cache hits, validation).
 
 ## Local Run
 
@@ -91,8 +101,21 @@ Runtime data is written under `data/` and ignored by git:
 npm run validate
 ```
 
+## Cost
+
+On Apify's free plan (~$5/mo credit) a typical search costs roughly $0.10–0.20 (structured profile-search page + a couple of cheap web queries + a few enrichments), so ~25–40 fresh searches before the credit resets. `cache-first` mode (the default) reuses cached actor runs, so repeated or replayed searches are free. Tune cost with `APIFY_PROFILE_SEARCH_ENABLED`, `APIFY_ENRICH_ENABLED`, `APIFY_ENRICH_MAX_PROFILES`, and `APIFY_MAX_RESULTS`.
+
+## Quick live check
+
+```bash
+node scripts/live-check.mjs "Find Armenians who work at OpenAI" fast
+node scripts/live-check.mjs "Armenian AI founders in San Francisco" fast
+```
+
+Prints the ranked candidates with evidence, confidence, and Gemini's Armenian-confidence label.
+
 ## Next Steps
 
-- Add ScaleKit auth and partition saved leads by user.
-- Add a dedicated LinkedIn Apify Actor once you choose the exact actor and input schema.
-- Add LLM extraction for richer profile parsing from long Apify text results.
+- Add ScaleKit auth and partition saved leads by user (see `SCALEKIT.md`).
+- Resolve harvestapi's obfuscated `/in/ACw...` profile URLs to public vanity URLs before enrichment for broader enrichment coverage.
+- Add a named-person search path (exact-name templates + single-profile enrichment).

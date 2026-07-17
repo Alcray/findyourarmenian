@@ -7,7 +7,10 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "bot": "node src/telegramBot.js",
-    "validate": "node src/validate.js"
+    "validate": "node src/validate.js",
+    "bench": "node bench/run.mjs",
+    "bench:save": "node bench/run.mjs --save",
+    "bench:capture": "node bench/run.mjs --capture --save"
   },
   "engines": {
     "node": ">=20"

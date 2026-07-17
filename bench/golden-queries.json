@@ -1,0 +1,22 @@
+{
+  "description": "Golden queries for pipeline-level metrics. Runs cache-first (reuses data/raw-runs fixtures) so it is reproducible and free. knownArmenianSurnames are lower-cased substrings of people we have confirmed are real Armenian matches for the query — used to measure recall. Capture fixtures once with: node bench/run.mjs --capture",
+  "queries": [
+    {
+      "id": "openai-company",
+      "query": "Find Armenians who work at OpenAI",
+      "mode": "fast",
+      "type": "company",
+      "expectCompany": "OpenAI",
+      "knownArmenianSurnames": ["hakobyan", "zokhrabyan", "grigorian", "nersisyan", "hovsepian", "ambartsumyan"],
+      "minResults": 3
+    },
+    {
+      "id": "sf-ai-founders",
+      "query": "Armenian AI founders in San Francisco",
+      "mode": "fast",
+      "type": "location",
+      "knownArmenianSurnames": ["bdoyan", "avagyan", "atarbekyan", "gadukyan", "archouniani", "hakobyan", "manukyan"],
+      "minResults": 4
+    }
+  ]
+}

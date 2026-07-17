@@ -1,0 +1,26 @@
+{
+  "savedAt": "2026-07-07T06:20:13.194Z",
+  "composite": 89,
+  "detector": {
+    "precision": 1,
+    "recall": 1,
+    "f1": 1,
+    "accuracy": 1
+  },
+  "pipeline": [
+    {
+      "id": "openai-company",
+      "resultCount": 4,
+      "knownRecall": 0.5,
+      "precisionByName": 0.75,
+      "companyMatchRate": 1
+    },
+    {
+      "id": "sf-ai-founders",
+      "resultCount": 10,
+      "knownRecall": 0.8571428571428571,
+      "precisionByName": 1,
+      "companyMatchRate": null
+    }
+  ]
+}

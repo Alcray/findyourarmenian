@@ -4,7 +4,10 @@ const refreshInput = document.querySelector('#refresh');
 const searchButton = document.querySelector('#search-button');
 const statusEl = document.querySelector('#status');
 const resultsEl = document.querySelector('#results');
-const leadsEl = document.querySelector('#leads');
+const contactsEl = document.querySelector('#contacts');
+const contactsSearchForm = document.querySelector('#contacts-search-form');
+const contactsSearchInput = document.querySelector('#contacts-search');
+const contactsCountEl = document.querySelector('#contacts-count');
 const jobsEl = document.querySelector('#jobs');
 const traceEl = document.querySelector('#agent-trace');
 const traceSummaryEl = document.querySelector('#agent-trace-summary');
@@ -16,7 +19,7 @@ const contactsTab = document.querySelector('#contacts-tab');
 const searchPanel = document.querySelector('#search-panel');
 const contactsPanel = document.querySelector('#contacts-panel');
 const historyEl = document.querySelector('#history');
-let searchMode = 'agent';
+let searchMode = 'quality';
 let funStatusTimer = null;
 let funStatusIndex = 0;
 let activeJobId = '';
@@ -47,15 +50,20 @@ form.addEventListener('submit', async (event) => {
 });
 
 fastModeButton.addEventListener('click', () => setSearchMode('fast'));
-agentModeButton.addEventListener('click', () => setSearchMode('agent'));
+agentModeButton.addEventListener('click', () => setSearchMode('quality'));
 searchTab.addEventListener('click', () => setActiveTab('search'));
 contactsTab.addEventListener('click', () => setActiveTab('contacts'));
+
+contactsSearchForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  loadContacts(contactsSearchInput.value.trim());
+});
 
 async function init() {
   await api('/api/config');
   await loadJobs();
   await loadHistory();
-  await loadLeads();
+  await loadContacts();
 }
 
 async function runSearch() {
@@ -77,7 +85,7 @@ async function runSearch() {
     renderJob(job);
     statusEl.textContent = `Started ${job.mode} search. You can run another query now.`;
 
-    if (job.mode === 'agent') {
+    if (job.mode !== 'fast') {
       hideAgentTrace();
       startFunnyStatusTicker(job.id);
     } else {
@@ -138,13 +146,13 @@ function renderCompletedSearch(result) {
   const validation = result.agent?.validation;
   const contactCache = result.agent?.contactCache;
   const mcp = result.agent?.mcp;
-  const agentSummary = result.mode === 'agent' && validation?.geminiUsed
+  const agentSummary = result.mode !== 'fast' && validation?.geminiUsed
     ? ` Agent planned ${planning?.stepCount || result.plan?.steps?.length || 0} steps, saw ${mcp?.toolCount || 0} MCP tools, loaded ${contactCache?.matched || 0} cached contacts, and judged ${validation.judgedCandidates || 0} candidates.`
     : validation?.error || planning?.error
       ? ` Agent note: ${validation?.error || planning?.error}`
       : '';
   statusEl.textContent = `Found ${result.results.length} candidates. ${runSummary || ''}${agentSummary}`;
-  if (result.mode === 'agent') {
+  if (result.mode !== 'fast') {
     renderAgentTrace(result);
   } else {
     hideAgentTrace();
@@ -207,12 +215,14 @@ function setActiveTab(tab) {
   contactsTab.classList.toggle('active', !isSearch);
   searchPanel.hidden = !isSearch;
   contactsPanel.hidden = isSearch;
+  // Refresh the list each time it's opened so newly found people show up.
+  if (!isSearch) loadContacts(contactsSearchInput.value.trim());
 }
 
 function setSearchMode(mode) {
   searchMode = mode;
   fastModeButton.classList.toggle('active', mode === 'fast');
-  agentModeButton.classList.toggle('active', mode === 'agent');
+  agentModeButton.classList.toggle('active', mode !== 'fast');
   if (mode === 'fast') hideAgentTrace();
 }
 
@@ -340,7 +350,7 @@ function renderAgentTrace(result) {
         Raw hidden chain-of-thought is not shown; this is the auditable trace.
       </p>
       <div class="tags">
-        <span class="pill">Mode: ${result.mode === 'agent' ? 'Agent' : 'Fast'}</span>
+        <span class="pill">Mode: ${result.mode !== 'fast' ? 'Quality' : 'Fast'}</span>
         <span class="pill">Planner: ${planning.geminiUsed ? escapeHtml(planning.model || 'Gemini') : 'fallback'}</span>
         <span class="pill">Validator: ${validation.geminiUsed ? escapeHtml(validation.model || 'Gemini') : 'fallback'}</span>
       </div>
@@ -389,17 +399,19 @@ function renderAgentTrace(result) {
   `;
 }
 
-async function loadLeads() {
-  const result = await api('/api/leads');
-  if (!result.leads.length) {
-    leadsEl.innerHTML = '<p class="muted">No saved leads yet.</p>';
+async function loadContacts(q = '') {
+  const result = await api(`/api/contacts${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+  contactsCountEl.textContent = q
+    ? `${result.total} match "${q}"`
+    : `${result.total} found so far — grows with every search`;
+  if (!result.contacts.length) {
+    contactsEl.innerHTML = q
+      ? '<p class="muted">No one in your list matches that yet.</p>'
+      : '<p class="muted">No contacts yet. Run a search — everyone found lands here automatically.</p>';
     return;
   }
-
-  leadsEl.innerHTML = result.leads
-    .map((lead) => personCard(lead.person, lead))
-    .join('');
-  bindLeadForms(leadsEl);
+  contactsEl.innerHTML = result.contacts.map((contact) => personCard(contact, contact.lead)).join('');
+  bindLeadForms(contactsEl);
 }
 
 async function loadHistory() {
@@ -425,7 +437,7 @@ async function loadHistory() {
   historyEl.querySelectorAll('.history-card').forEach((card) => {
     card.addEventListener('click', async () => {
       queryInput.value = card.dataset.query || '';
-      setSearchMode(card.dataset.mode === 'agent' ? 'agent' : 'fast');
+      setSearchMode(card.dataset.mode === 'fast' ? 'fast' : 'quality');
       setActiveTab('search');
       await loadSearchFromHistory(card.dataset.key);
     });
@@ -441,7 +453,7 @@ async function loadSearchFromHistory(searchKey) {
   try {
     const result = await api(`/api/searches/${encodeURIComponent(searchKey)}`);
     statusEl.textContent = `Loaded from history with ${result.results.length} candidates.`;
-    if (result.mode === 'agent') renderAgentTrace(result);
+    if (result.mode !== 'fast') renderAgentTrace(result);
     renderPeople(result.results, resultsEl);
   } catch (error) {
     statusEl.textContent = error.message;
@@ -533,8 +545,8 @@ function bindLeadForms(root) {
           notes: data.get('notes'),
         }),
       });
-      await loadLeads();
-      statusEl.textContent = 'Lead saved.';
+      await loadContacts(contactsSearchInput.value.trim());
+      statusEl.textContent = 'Saved to your list.';
     });
   });
 }

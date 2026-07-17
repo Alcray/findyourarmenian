@@ -1,23 +1,28 @@
-import { config } from './config.js';
 import { searchPeopleFast } from './fastAgent.js';
 import { runLangChainSearchAgent } from './langchainAgent.js';
+import { resolveMode } from './modes.js';
 import { hashValue, listLeads, listProfiles, saveSearch } from './store.js';
 
-export async function searchPeople({ query, refresh = false, limit = config.apifyMaxResults, mode = 'fast' }) {
-  if (mode !== 'agent') {
-    return searchPeopleFast({ query, refresh, limit });
+// Default is quality — best results, cost not a constraint. Pass mode:'fast' to
+// use the cheap path.
+export async function searchPeople({ query, refresh = false, limit, mode = 'quality' }) {
+  const profile = resolveMode(mode);
+  const effectiveLimit = limit || profile.maxResults;
+
+  if (!profile.planning) {
+    return searchPeopleFast({ query, refresh, limit: effectiveLimit, profile });
   }
 
   if (!query || query.trim().length < 3) {
     throw new Error('Please enter a more specific search query.');
   }
 
-  const agentResult = await runLangChainSearchAgent({ query, refresh, limit });
-  const uniqueProfiles = agentResult.profiles.slice(0, limit);
+  const agentResult = await runLangChainSearchAgent({ query, refresh, limit: effectiveLimit, profile });
+  const uniqueProfiles = agentResult.profiles.slice(0, effectiveLimit);
 
   const search = {
-    searchKey: hashValue({ query: agentResult.query, limit, mode: 'agent', runAt: Date.now() }),
-    mode: 'agent',
+    searchKey: hashValue({ query: agentResult.query, limit: effectiveLimit, mode: profile.name, runAt: Date.now() }),
+    mode: profile.name,
     query: agentResult.query,
     intent: agentResult.intent,
     searchQueries: agentResult.searchQueries,

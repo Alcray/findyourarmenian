@@ -12,7 +12,7 @@ process.env.GOOGLE_CLOUD_API_KEY = '';
 process.env.GEMINI_ENABLED = 'false';
 
 const { demoItemsForQuery } = await import('./demoData.js');
-const { buildSearchQueries, normalizeCandidates, parseIntent } = await import('./people.js');
+const { armenianSurnameScore, buildSearchQueries, normalizeCandidates, parseIntent } = await import('./people.js');
 const { searchPeople } = await import('./agent.js');
 const { planSearchWithGemini } = await import('./geminiClient.js');
 
@@ -20,9 +20,22 @@ const intent = parseIntent(query);
 assert.equal(intent.company, 'OpenAI');
 assert.equal(intent.location, 'San Francisco');
 
+// Surname model: curated Armenian surnames score strong; -ian/-yan words that are
+// actually Western/Persian/Chinese names must not be treated as Armenian.
+assert.ok(armenianSurnameScore('hakobyan', 'aram') >= 30, 'curated Armenian surname should score strong');
+assert.ok(armenianSurnameScore('kardashian', 'kim') >= 20, 'diaspora -ian surname should score');
+assert.ok(armenianSurnameScore('sanasaryantz', 'davit') >= 30, 'transliteration -yantz variant should score');
+assert.equal(armenianSurnameScore('julian', 'brian'), 0, 'Julian is not an Armenian surname');
+assert.equal(armenianSurnameScore('sebastian', 'marco'), 0, 'Sebastian is not an Armenian surname');
+assert.equal(armenianSurnameScore('hosseinian', 'reza'), 0, 'Persian -ian beside a Persian first name is not Armenian');
+assert.equal(armenianSurnameScore('yang', 'wei'), 0, 'Chinese name is not Armenian');
+
 const searchQueries = buildSearchQueries(intent);
 assert.ok(searchQueries.length >= 2);
 assert.ok(searchQueries[0].includes('site:linkedin.com/in'));
+// The winning query form is simple and unquoted — no "Armenian language" phrase stacking.
+assert.ok(searchQueries.every((query) => !query.includes('"Armenian language"')));
+assert.ok(searchQueries[0].includes('OpenAI') && searchQueries[0].includes('Armenian'));
 
 const candidates = normalizeCandidates(demoItemsForQuery(query), intent, searchQueries[0], {
   actorId: 'demo',
@@ -121,7 +134,8 @@ const implicitArmenianIntent = parseIntent('find people who work at Google in Ba
 assert.equal(implicitArmenianIntent.wantsArmenian, true);
 const implicitQueries = buildSearchQueries(implicitArmenianIntent).join(' ');
 assert.ok(implicitQueries.includes('Armenian'));
-assert.ok(implicitQueries.includes('Armenian language') || implicitQueries.includes('Armenian-American'));
+// Armenian identity is always injected even when the user never typed it.
+assert.ok(implicitQueries.includes('site:linkedin.com/in'));
 
 const firstSearch = await searchPeople({ query, limit: 5 });
 const secondSearch = await searchPeople({ query, limit: 5 });

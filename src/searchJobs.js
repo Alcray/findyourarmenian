@@ -4,7 +4,7 @@ import { hashValue } from './store.js';
 
 const jobs = new Map();
 
-export function startSearchJob({ query, refresh = false, limit = config.apifyMaxResults, mode = 'agent' }) {
+export function startSearchJob({ query, refresh = false, limit = config.apifyMaxResults, mode = 'quality' }) {
   const job = {
     id: `job_${hashValue({ query, refresh, limit, mode, startedAt: Date.now(), random: Math.random() })}`,
     query,

@@ -1,4 +1,6 @@
 import { config } from './config.js';
+import { fetchWithRetry } from './http.js';
+import { ARMENIAN_SURNAME_QUERY_BATCH } from './people.js';
 
 const EXECUTABLE_TOOLS = [
   {
@@ -26,25 +28,26 @@ const EXECUTABLE_TOOLS = [
 const DEFAULT_ARMENIAN_MISSION =
   'The app always searches for Armenian people by nationality, identity, language, diaspora, community, or strong Armenian name evidence. The user does not need to type Armenian.';
 
-export async function planSearchWithGemini(query, fallbackIntent) {
+export async function planSearchWithGemini(query, fallbackIntent, { model } = {}) {
+  const useModel = model || config.geminiModel;
   const fallbackPlan = deterministicPlan(query, fallbackIntent);
   if (!config.geminiEnabled || !config.geminiApiKey) {
     return {
       plan: fallbackPlan,
       planning: {
         geminiUsed: false,
-        model: config.geminiModel,
+        model: useModel,
       },
     };
   }
 
   try {
-    const plan = sanitizePlan(await requestSearchPlan(query, fallbackIntent), fallbackPlan);
+    const plan = sanitizePlan(await requestSearchPlan(query, fallbackIntent, useModel), fallbackPlan);
     return {
       plan,
       planning: {
         geminiUsed: true,
-        model: config.geminiModel,
+        model: useModel,
         stepCount: plan.steps.length,
       },
     };
@@ -53,31 +56,32 @@ export async function planSearchWithGemini(query, fallbackIntent) {
       plan: fallbackPlan,
       planning: {
         geminiUsed: false,
-        model: config.geminiModel,
+        model: useModel,
         error: error.message,
       },
     };
   }
 }
 
-export async function validateCandidatesWithGemini(intent, candidates) {
+export async function validateCandidatesWithGemini(intent, candidates, { model } = {}) {
+  const useModel = model || config.geminiModel;
   if (!config.geminiEnabled || !config.geminiApiKey || !candidates.length) {
     return {
       candidates,
       agent: {
         geminiUsed: false,
-        model: config.geminiModel,
+        model: useModel,
       },
     };
   }
 
   try {
-    const judgments = await requestCandidateJudgments(intent, candidates);
+    const judgments = await requestCandidateJudgments(intent, candidates, useModel);
     return {
-      candidates: applyJudgments(candidates, judgments),
+      candidates: applyJudgments(intent, candidates, judgments),
       agent: {
         geminiUsed: true,
-        model: config.geminiModel,
+        model: useModel,
         judgedCandidates: judgments.length,
       },
     };
@@ -86,14 +90,14 @@ export async function validateCandidatesWithGemini(intent, candidates) {
       candidates,
       agent: {
         geminiUsed: false,
-        model: config.geminiModel,
+        model: useModel,
         error: error.message,
       },
     };
   }
 }
 
-async function requestCandidateJudgments(intent, candidates) {
+async function requestCandidateJudgments(intent, candidates, model) {
   const compactCandidates = candidates.slice(0, 16).map((candidate) => ({
     id: candidate.id,
     name: candidate.name,
@@ -101,11 +105,13 @@ async function requestCandidateJudgments(intent, candidates) {
     company: candidate.company,
     role: candidate.role,
     location: candidate.location,
-    confidence: candidate.confidence,
+    // Named heuristicPrior (not "confidence") so the model treats it as a weak
+    // prior, not evidence, and reasons from the source text instead.
+    heuristicPrior: candidate.confidence,
     sources: (candidate.sources || []).slice(0, 2).map((source) => ({
       title: source.title,
       snippet: source.snippet,
-      context: source.context,
+      context: (source.context || '').slice(0, 1400),
       url: source.url,
       kind: source.kind,
       targetCompany: source.targetCompany,
@@ -145,7 +151,15 @@ Return only valid JSON with this exact shape:
   ]
 }
 
+Scoring rubric for overall_score (0-100):
+- 80-100: explicit Armenian identity/nationality/language/community/diaspora evidence AND the request (company/role/location) is supported.
+- 60-79: strong Armenian surname/name evidence with request supported, or explicit identity with weaker request match.
+- 40-59: request supported (e.g. confirmed at target company) but Armenian evidence is only a surname or context signal.
+- 20-39: weak or ambiguous on both dimensions.
+- 0-19: wrong company/role/location, non-person, or no Armenian signal.
+
 Rules:
+- heuristicPrior is a rough local score. Treat it as a weak prior only; base your judgment on the candidate name and source text.
 - Be strict. If the target company is present, matches_request must be false unless the candidate text supports current work at that company.
 - For web/RAG candidates, do not trust the search query itself as evidence. Only use the candidate title/snippet/context.
 - If a candidate was found by a company query but the profile context only mentions the company in posts, likes, reposts, related profiles, or generic search text, works_at_target_company must be false.
@@ -157,11 +171,11 @@ Rules:
 - display_bucket should be likely for strong Armenian evidence, possible for company-confirmed but weak Armenian evidence, and reject for wrong company or obvious non-person/non-match.
 - Only set matches_request false when the target company/role/location clearly does not match, or the record is obviously not a person.`;
 
-  const parsed = await requestGeminiJson(prompt, { temperature: 0.1 });
+  const parsed = await requestGeminiJson(prompt, { temperature: 0.1, model });
   return Array.isArray(parsed.results) ? parsed.results : [];
 }
 
-async function requestSearchPlan(query, fallbackIntent) {
+async function requestSearchPlan(query, fallbackIntent, model) {
   const prompt = `You are the planning layer for "Find Your Armenian", a people-discovery app for likely Armenian professionals.
 
 Mission:
@@ -206,42 +220,52 @@ Planning rules:
 - For company-only queries, prefer a single company_employee_search step. Do not add web_rag_search unless the user asks for a location, school, founder/topic research, or named person verification.
 - Use web_rag_search for location searches like Santa Clara, San Francisco, Bay Area, Palo Alto, Mountain View, or San Jose.
 - For location-only searches, include one precise step and one broadened step if helpful, e.g. Santa Clara then Bay Area.
-- Every web query must include LinkedIn/person context and strong Armenian identity terms such as Armenian, Armenian-American, Armenian language, Armenian diaspora, Armenian community, or Hayastan. Do not rely on Armenia/Yerevan alone and do not use bare "ian" or "yan" as standalone web-search terms because they create false positives like Ian or Yan.
+- Web queries must use the SHORT form: "site:linkedin.com/in <company or terms> Armenian". Never stack quoted phrases like "Armenian language" or "Armenian-American" in a query — they surface non-Armenians at the wrong company and destroy result quality.
+- For location/role/open searches (no company), you may add ONE surname-OR batch step, e.g. site:linkedin.com/in <terms> (Hakobyan OR Sargsyan OR Grigoryan OR Harutyunyan OR Petrosyan). Do not use a bare "ian" or "yan" token; they create false positives like Ian or Yan.
 - For founder/topic requests, use web_rag_search against LinkedIn profiles, founder pages, GitHub, Crunchbase-style pages, and personal websites.
 - If a specific person name appears, plan a precise web_rag_search for that name and optionally profile_enrichment if a LinkedIn URL is known.
 - Do not choose tools outside the executable tool list.
 - Limit to 4 steps. Prefer high-precision searches over broad scraping.`;
 
-  return requestGeminiJson(prompt, { temperature: 0.2 });
+  return requestGeminiJson(prompt, { temperature: 0.2, model });
 }
 
-async function requestGeminiJson(prompt, { temperature }) {
-  const response = await fetch(`${config.geminiApiBase}/${config.geminiModel}:generateContent`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-goog-api-key': config.geminiApiKey,
-    },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature,
-        responseMimeType: 'application/json',
+async function requestGeminiJson(prompt, { temperature, model }) {
+  const useModel = model || config.geminiModel;
+  // The Vertex free/express tier serves transient 404 HTML pages under load;
+  // fetchWithRetry treats those (and 429/5xx) as retryable with backoff.
+  const result = await fetchWithRetry(
+    `${config.geminiApiBase}/${useModel}:generateContent`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-goog-api-key': config.geminiApiKey,
       },
-    }),
-  });
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature,
+          responseMimeType: 'application/json',
+        },
+      }),
+    },
+    // Keep the total budget (retries x timeout + backoff) well under the 120s
+    // server cap so a hung endpoint degrades to heuristics instead of a 504.
+    { label: 'Gemini', timeoutMs: 20000, retries: 2, retryOnHtml: true },
+  );
 
-  const body = await response.text();
-  if (!response.ok) {
-    throw new Error(`Gemini failed with HTTP ${response.status}: ${body.slice(0, 300)}`);
+  if (!result.ok) {
+    throw new Error(`Gemini failed with HTTP ${result.status}: ${result.text.slice(0, 300)}`);
   }
 
-  const payload = JSON.parse(body);
+  const payload = result.json ?? JSON.parse(result.text);
   const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
   return JSON.parse(stripJsonFences(text));
 }
 
-function applyJudgments(candidates, judgments) {
+function applyJudgments(intent, candidates, judgments) {
+  const companyGated = Boolean(intent.company);
   const byId = new Map(judgments.map((judgment) => [judgment.id, judgment]));
 
   return candidates
@@ -275,9 +299,12 @@ function applyJudgments(candidates, judgments) {
     .filter((candidate) => {
       const judgment = candidate.geminiJudgment;
       if (!judgment) return true;
-      if (judgment.worksAtTargetCompany === false) return false;
-      if (candidate.needsVerification && judgment.worksAtTargetCompany !== true) return false;
-      if (judgment.matchesRequest === false && candidate.company === '') return false;
+      // Only enforce company affiliation when the user actually asked for a
+      // company. On location/role/open searches there is no target company, so
+      // works_at_target_company is meaningless and must not drop candidates.
+      if (companyGated && judgment.worksAtTargetCompany === false) return false;
+      if (companyGated && candidate.needsVerification && judgment.worksAtTargetCompany !== true) return false;
+      if (judgment.matchesRequest === false && !candidate.company) return false;
       if (candidate.displayBucket === 'reject') return false;
       return true;
     })
@@ -336,22 +363,27 @@ function deterministicPlan(query, intent) {
   const target = [company, role, location].filter(Boolean).join(' ');
   steps.push({
     tool: 'web_rag_search',
-    reason: company ? 'Fallback search with public evidence.' : 'Open-ended people search.',
+    reason: company ? 'Public web evidence for the target company.' : 'Open-ended people search.',
     company,
-    query: `site:linkedin.com/in ${target} Armenian "Armenian language" "Armenian-American"`.replace(/\s+/g, ' ').trim(),
+    // Simple unquoted form — empirically returns real Armenians at the target,
+    // unlike the old multi-quoted form which surfaced non-Armenians elsewhere.
+    query: `site:linkedin.com/in ${target} Armenian`.replace(/\s+/g, ' ').trim(),
     role,
     location,
     maxResults: config.apifyMaxResults,
   });
 
-  if (!company && locationAlternates[0]) {
+  if (!company) {
+    const broadLocation = locationAlternates[0] || location || '';
     steps.push({
       tool: 'web_rag_search',
-      reason: 'Broaden nearby location to improve recall.',
+      reason: 'Surname-OR batch to improve recall on open/location searches.',
       company,
-      query: `site:linkedin.com/in ${role || ''} Armenian "Armenian language" "Armenian-American" founder engineer ${locationAlternates[0]}`.replace(/\s+/g, ' ').trim(),
+      query: `site:linkedin.com/in ${[role, broadLocation].filter(Boolean).join(' ')} (${ARMENIAN_SURNAME_QUERY_BATCH.join(' OR ')})`
+        .replace(/\s+/g, ' ')
+        .trim(),
       role,
-      location: locationAlternates[0],
+      location: broadLocation || null,
       maxResults: config.apifyMaxResults,
     });
   }
@@ -444,8 +476,12 @@ function sanitizeSearchQuery(query) {
     .replace(/\bian\s+OR\b/gi, '')
     .replace(/\bOR\s+yan\b/gi, '')
     .replace(/\byan\s+OR\b/gi, '')
+    // Strip quoted identity phrases if the model adds them back — the short
+    // unquoted form is what actually finds Armenians at the target.
+    .replace(/"armenian language"/gi, '')
+    .replace(/"armenian[- ]american"/gi, '')
+    .replace(/"speaks armenian"/gi, '')
     .replace(/\(\s*Armenian\s*\)/gi, 'Armenian')
-    .replace(/\bArmenia\s+Yerevan\b/gi, 'Armenian "Armenian language"')
     .replace(/\(\s*\)/g, '')
     .replace(/\s+/g, ' ')
     .trim();
