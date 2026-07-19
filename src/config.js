@@ -55,11 +55,40 @@ function csvEnv(name) {
   return [...new Set(String(process.env[name] || '').split(',').map((value) => value.trim()).filter(Boolean))];
 }
 
+const railwayRuntime = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN);
+const hostedRuntime = process.env.NODE_ENV === 'production' || railwayRuntime;
+const authPassword = process.env.AUTH_PASSWORD || process.env.APP_PASSWORD || '';
+const authSessionSecret = process.env.AUTH_SESSION_SECRET || process.env.SESSION_SECRET || '';
+
+if (Boolean(authPassword) !== Boolean(authSessionSecret)) {
+  throw new Error('AUTH_PASSWORD and AUTH_SESSION_SECRET must be configured together.');
+}
+if (hostedRuntime && (!authPassword || !authSessionSecret)) {
+  throw new Error('Authentication is required in production. Configure AUTH_PASSWORD and AUTH_SESSION_SECRET.');
+}
+if (authPassword && authPassword.length < 16) {
+  throw new Error('AUTH_PASSWORD must contain at least 16 characters.');
+}
+if (authSessionSecret && Buffer.byteLength(authSessionSecret, 'utf8') < 32) {
+  throw new Error('AUTH_SESSION_SECRET must contain at least 32 bytes.');
+}
+
 export const config = {
   rootDir,
   port: boundedIntEnv('PORT', 3000, 1, 65535),
   host: process.env.HOST || '127.0.0.1',
-  allowedHosts: csvEnv('ALLOWED_HOSTS'),
+  allowedHosts: [
+    ...csvEnv('ALLOWED_HOSTS'),
+    process.env.RAILWAY_PUBLIC_DOMAIN || '',
+    ...(railwayRuntime ? ['healthcheck.railway.app'] : []),
+  ].filter(Boolean),
+  trustProxy: boolEnv('TRUST_PROXY', hostedRuntime),
+  authPassword,
+  authSessionSecret,
+  authSessionTtlSeconds: boundedIntEnv('AUTH_SESSION_TTL_SECONDS', 7 * 24 * 60 * 60, 15 * 60, 30 * 24 * 60 * 60),
+  authCookieSecure: boolEnv('AUTH_COOKIE_SECURE', hostedRuntime),
+  authMaxFailures: boundedIntEnv('AUTH_MAX_FAILURES', 10, 3, 100),
+  authFailureWindowSeconds: boundedIntEnv('AUTH_FAILURE_WINDOW_SECONDS', 15 * 60, 60, 24 * 60 * 60),
   dataDir: path.resolve(rootDir, process.env.DATA_DIR || './data'),
   apifyToken: process.env.APIFY_TOKEN || '',
   apifyMode: process.env.APIFY_MODE || 'cache-first',
@@ -110,23 +139,24 @@ export const config = {
   telegramDefaultLimit: boundedIntEnv('TELEGRAM_DEFAULT_LIMIT', 5, 1, 10),
 };
 
-export function publicConfig() {
+export function publicConfig(runtimeConfig = config) {
   return {
-    mode: config.apifyMode,
-    hasApifyToken: Boolean(config.apifyToken),
-    searchActor: config.apifySearchActor,
-    profileSearchActor: config.apifyProfileSearchActor,
-    profileSearchEnabled: config.apifyProfileSearchEnabled,
-    companyEmployeesActor: config.apifyCompanyEmployeesActor,
-    companyEmployeesEnabled: config.apifyCompanyEmployeesEnabled,
-    enrichmentActor: config.apifyEnrichmentActor,
-    enrichEnabled: config.apifyEnrichEnabled,
-    apifyMcpEnabled: Boolean(config.apifyMcpUrl && config.apifyToken && config.apifyMcpEnabled),
-    maxResults: config.apifyMaxResults,
-    companyMaxEmployees: config.apifyCompanyMaxEmployees,
-    hasGeminiKey: Boolean(config.geminiApiKey),
-    geminiEnabled: config.geminiEnabled,
-    geminiModel: config.geminiModel,
-    geminiApiBase: config.geminiApiBase.replace(/^https?:\/\//, ''),
+    authEnabled: Boolean(runtimeConfig.authPassword && runtimeConfig.authSessionSecret),
+    mode: runtimeConfig.apifyMode,
+    hasApifyToken: Boolean(runtimeConfig.apifyToken),
+    searchActor: runtimeConfig.apifySearchActor,
+    profileSearchActor: runtimeConfig.apifyProfileSearchActor,
+    profileSearchEnabled: runtimeConfig.apifyProfileSearchEnabled,
+    companyEmployeesActor: runtimeConfig.apifyCompanyEmployeesActor,
+    companyEmployeesEnabled: runtimeConfig.apifyCompanyEmployeesEnabled,
+    enrichmentActor: runtimeConfig.apifyEnrichmentActor,
+    enrichEnabled: runtimeConfig.apifyEnrichEnabled,
+    apifyMcpEnabled: Boolean(runtimeConfig.apifyMcpUrl && runtimeConfig.apifyToken && runtimeConfig.apifyMcpEnabled),
+    maxResults: runtimeConfig.apifyMaxResults,
+    companyMaxEmployees: runtimeConfig.apifyCompanyMaxEmployees,
+    hasGeminiKey: Boolean(runtimeConfig.geminiApiKey),
+    geminiEnabled: runtimeConfig.geminiEnabled,
+    geminiModel: runtimeConfig.geminiModel,
+    geminiApiBase: runtimeConfig.geminiApiBase.replace(/^https?:\/\//, ''),
   };
 }

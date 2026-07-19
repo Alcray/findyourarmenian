@@ -40,6 +40,10 @@ npm start
 
 Open `http://localhost:3000`.
 
+For a password-protected local run, set both `AUTH_PASSWORD` and
+`AUTH_SESSION_SECRET`. Authentication is optional only in local development;
+production starts fail-closed when either value is missing.
+
 ## Docker Run
 
 ```bash
@@ -55,6 +59,44 @@ docker run --rm \
 If your Jetson is on Tailscale, open `http://<tailscale-device-name>:3000` or `http://<tailscale-ip>:3000` from another device on the tailnet.
 Add that device name/IP to `ALLOWED_HOSTS` first; network Host headers are denied by default.
 
+## Railway Deployment
+
+This repository includes a Railway configuration and a production Docker image.
+The image initializes the mounted data directory as root, then drops privileges
+and runs the application as the unprivileged `node` user.
+
+1. Create a Railway project from the GitHub repository and branch you want to deploy.
+2. Add a persistent volume mounted at `/app/data`.
+3. Add the required secrets and conservative production settings:
+
+```bash
+AUTH_PASSWORD=<unique password of at least 16 characters>
+AUTH_SESSION_SECRET=<separate random secret of at least 32 bytes>
+APIFY_TOKEN=<current Apify token>
+GEMINI_API_KEY=<current Gemini key>
+
+APIFY_MODE=cache-first
+APIFY_MAX_RESULTS=8
+APIFY_REQUEST_TIMEOUT_MS=90000
+APIFY_MAX_TOTAL_CHARGE_USD=0.25
+APIFY_DISCOVERY_CONCURRENCY=1
+APIFY_SURNAME_SEED_COUNT=0
+APIFY_COMPANY_EMPLOYEES_ENABLED=false
+APIFY_ENRICH_MAX_PROFILES=6
+GEMINI_ENABLED=true
+```
+
+4. Generate a public domain and enable Railway Serverless/App Sleeping.
+
+Railway provides the public domain and healthcheck host automatically; both are
+added to the HTTP Host allowlist. `/api/health` and `/api/ready` remain public for
+platform probes, while the UI, contacts, history, notes, configuration, and paid
+search endpoints require a signed-in session. Never commit production secrets.
+
+The Git repository intentionally excludes `data/`, so a new Railway volume starts
+empty. Import existing local data only after authentication is enabled, and keep
+the volume attached to preserve contacts and search history across deployments.
+
 ## Configuration
 
 ```bash
@@ -62,6 +104,10 @@ PORT=3000
 DATA_DIR=./data
 HOST=127.0.0.1
 ALLOWED_HOSTS=
+AUTH_PASSWORD=
+AUTH_SESSION_SECRET=
+AUTH_SESSION_TTL_SECONDS=604800
+# AUTH_COOKIE_SECURE=true
 APIFY_TOKEN=
 APIFY_MODE=cache-first
 APIFY_MAX_RESULTS=8
@@ -98,6 +144,8 @@ Runtime data is written under `data/` and ignored by git:
 - `data/.sandbox/`: isolated demo/fixture state, never merged with live people.
 - `data/leads.json`: saved lead status and notes.
 
+On Railway, the same files live in the persistent volume at `/app/data`.
+
 ## API
 
 - `POST /api/search` with `Content-Type: application/json` and `{ "query": "Find Armenians at OpenAI", "refresh": false }`
@@ -105,6 +153,9 @@ Runtime data is written under `data/` and ignored by git:
 - `POST /api/leads` with `Content-Type: application/json` and `{ "personId": "...", "status": "contacted", "notes": "..." }`
 - `GET /api/health`
 - `GET /api/ready` (503 when live discovery is not configured)
+
+All routes except the two health probes and the login/logout flow require a
+valid session whenever authentication is enabled.
 
 ## Validation
 
@@ -132,7 +183,7 @@ Prints the ranked candidates with evidence, confidence, and Gemini's Armenian-co
 
 ## Next Steps
 
-- Before any public deployment, add authentication/rate limits, partition saved data by user, and replace the process-local JSON/job queue with a durable database/queue (Supabase is a reasonable free-tier option). The current app is hardened for trusted/local use, not safe as an unauthenticated public API.
+- Before sharing the app with multiple independent users, partition saved data by user and replace the process-local JSON/job queue with a durable database/queue (Supabase is a reasonable free-tier option). The current password gate is designed for a single trusted owner or small trusted group.
 - Keep the Telegram chat allowlist enabled; do not expose paid search commands to arbitrary bot users.
 - Resolve harvestapi's obfuscated `/in/ACw...` profile URLs to public vanity URLs before enrichment for broader enrichment coverage.
 - Add a named-person search path (exact-name templates + single-profile enrichment).

@@ -4,6 +4,14 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { searchPeople, savedLeadsWithProfiles } from './agent.js';
+import {
+  authEnabled,
+  createLoginRateLimiter,
+  expiredSessionCookie,
+  requestHasValidSession,
+  sessionCookie,
+  verifyPassword,
+} from './auth.js';
 import { config, publicConfig } from './config.js';
 import { deleteSearchJob, getSearchJob, listSearchJobs, startSearchJob } from './searchJobs.js';
 import { getSearch, listContactsWithLeads, listLeads, listProfiles, listSearches, upsertLead } from './store.js';
@@ -24,12 +32,35 @@ const SECURITY_HEADERS = {
 };
 let activeSyncSearches = 0;
 
-export function createServer() {
+export function createServer({ runtimeConfig = config } = {}) {
+  const loginRateLimiter = createLoginRateLimiter({
+    maxFailures: runtimeConfig.authMaxFailures,
+    windowMs: runtimeConfig.authFailureWindowSeconds * 1000,
+  });
+
   return http.createServer(async (req, res) => {
     try {
-      assertAllowedRequestHost(req);
+      assertAllowedRequestHost(req, runtimeConfig);
+      const url = new URL(req.url || '/', 'http://localhost');
+
+      if (isHealthCheck(req, url)) {
+        await handleApi(req, res, runtimeConfig);
+        return;
+      }
+
+      if (authEnabled(runtimeConfig)) {
+        const handled = await handleAuthRoute(req, res, url, runtimeConfig, loginRateLimiter);
+        if (handled) return;
+
+        if (!requestHasValidSession(req, runtimeConfig)) {
+          sendAuthenticationRequired(req, res);
+          return;
+        }
+      }
+
+      assertSameOriginMutation(req);
       if (req.url?.startsWith('/api/')) {
-        await handleApi(req, res);
+        await handleApi(req, res, runtimeConfig);
         return;
       }
 
@@ -59,7 +90,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === serverFile) {
   startServer();
 }
 
-async function handleApi(req, res) {
+async function handleApi(req, res, runtimeConfig = config) {
   const url = new URL(req.url || '/', 'http://localhost');
 
   if (req.method === 'GET' && url.pathname === '/api/health') {
@@ -68,18 +99,18 @@ async function handleApi(req, res) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/ready') {
-    const readiness = await runtimeReadinessState();
+    const readiness = await runtimeReadinessState(runtimeConfig);
     sendJson(res, readiness.ok ? 200 : 503, readiness);
     return;
   }
 
   if (req.method === 'GET' && url.pathname === '/api/config') {
-    sendJson(res, 200, publicConfig());
+    sendJson(res, 200, publicConfig(runtimeConfig));
     return;
   }
 
   if (req.method === 'POST' && url.pathname === '/api/search') {
-    const input = normalizeSearchInput(await readBody(req));
+    const input = normalizeSearchInput(await readBody(req), runtimeConfig);
     if (activeSyncSearches >= MAX_CONCURRENT_SYNC_SEARCHES) {
       throw httpError(429, 'A synchronous search is already running. Use /api/jobs or try again later.');
     }
@@ -99,7 +130,7 @@ async function handleApi(req, res) {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/jobs') {
-    const input = normalizeSearchInput(await readBody(req));
+    const input = normalizeSearchInput(await readBody(req), runtimeConfig);
     const job = startSearchJob(input);
     sendJson(res, 202, { job });
     return;
@@ -177,6 +208,114 @@ async function handleApi(req, res) {
   throw Object.assign(new Error('Not found'), { statusCode: 404 });
 }
 
+async function handleAuthRoute(req, res, url, runtimeConfig, loginRateLimiter) {
+  if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/login' || url.pathname === '/login.html')) {
+    if (requestHasValidSession(req, runtimeConfig)) {
+      sendRedirect(res, '/');
+      return true;
+    }
+    await servePublicFile(req, res, 'login.html', { noStore: true });
+    return true;
+  }
+
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/login.js') {
+    await servePublicFile(req, res, 'login.js', { noStore: true });
+    return true;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/login') {
+    assertSameOriginMutation(req);
+    const clientKey = requestClientKey(req, runtimeConfig);
+    const limit = loginRateLimiter.check(clientKey);
+    if (limit.blocked) {
+      req.resume();
+      sendJson(res, 429, { error: 'Too many login attempts. Try again later.' }, {
+        'retry-after': String(limit.retryAfterSeconds),
+      });
+      return true;
+    }
+
+    const body = await readBody(req, 2048);
+    const validShape = Object.keys(body).every((field) => field === 'password')
+      && typeof body.password === 'string'
+      && body.password.length <= 1024;
+    if (!validShape || !verifyPassword(body.password, runtimeConfig)) {
+      loginRateLimiter.recordFailure(clientKey);
+      sendJson(res, 401, { error: 'Invalid password.' });
+      return true;
+    }
+
+    loginRateLimiter.reset(clientKey);
+    sendJson(res, 200, { ok: true }, { 'set-cookie': sessionCookie(runtimeConfig) });
+    return true;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
+    assertSameOriginMutation(req);
+    await readBody(req, 2048);
+    sendJson(res, 200, { ok: true }, {
+      'clear-site-data': '"cache", "storage"',
+      'set-cookie': expiredSessionCookie(runtimeConfig),
+    });
+    return true;
+  }
+
+  return false;
+}
+
+function isHealthCheck(req, url) {
+  return req.method === 'GET' && (url.pathname === '/api/health' || url.pathname === '/api/ready');
+}
+
+function sendAuthenticationRequired(req, res) {
+  if (!String(req.url || '').startsWith('/api/') && (req.method === 'GET' || req.method === 'HEAD')) {
+    sendRedirect(res, '/login');
+    return;
+  }
+  sendJson(res, 401, { error: 'Authentication required.' });
+}
+
+function sendRedirect(res, location) {
+  res.writeHead(303, {
+    ...SECURITY_HEADERS,
+    'cache-control': 'no-store',
+    'content-length': '0',
+    location,
+  });
+  res.end();
+}
+
+function assertSameOriginMutation(req) {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method || '')) return;
+
+  const fetchSite = String(req.headers['sec-fetch-site'] || '').toLowerCase();
+  if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+    throw httpError(403, 'Cross-origin requests are not allowed.');
+  }
+
+  const origin = String(req.headers.origin || '');
+  if (!origin) return;
+  try {
+    const originHost = new URL(origin).host.toLowerCase();
+    const requestHost = String(req.headers.host || '').toLowerCase();
+    if (!originHost || originHost !== requestHost) throw new Error('origin mismatch');
+  } catch {
+    throw httpError(403, 'Cross-origin requests are not allowed.');
+  }
+}
+
+function requestClientKey(req, runtimeConfig) {
+  if (runtimeConfig.trustProxy) {
+    const forwardedFor = String(req.headers['x-forwarded-for'] || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .at(-1);
+    if (forwardedFor) return forwardedFor.slice(0, 200);
+  }
+  return String(req.socket.remoteAddress || 'unknown').slice(0, 200);
+}
+
 export async function readBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   const contentType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
   if (contentType !== 'application/json') {
@@ -247,21 +386,33 @@ async function serveStatic(req, res) {
   }
 }
 
-function sendJson(res, statusCode, payload) {
+async function servePublicFile(req, res, fileName, { noStore = false } = {}) {
+  const filePath = path.join(publicDir, fileName);
+  try {
+    const content = await fs.readFile(filePath);
+    sendStatic(res, req.method, filePath, content, noStore ? 'no-store' : undefined);
+  } catch (error) {
+    if (error.code === 'ENOENT') throw httpError(404, 'Not found.');
+    throw error;
+  }
+}
+
+function sendJson(res, statusCode, payload, extraHeaders = {}) {
   const body = `${JSON.stringify(payload, null, 2)}\n`;
   res.writeHead(statusCode, {
     ...SECURITY_HEADERS,
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body),
     'content-type': 'application/json; charset=utf-8',
+    ...extraHeaders,
   });
   res.end(body);
 }
 
-function sendStatic(res, method, filePath, content) {
+function sendStatic(res, method, filePath, content, cacheControl) {
   res.writeHead(200, {
     ...SECURITY_HEADERS,
-    'cache-control': filePath.endsWith('.html') ? 'no-cache' : 'public, max-age=3600',
+    'cache-control': cacheControl || (filePath.endsWith('.html') ? 'no-store' : 'public, max-age=3600'),
     'content-length': content.length,
     'content-type': contentType(filePath),
   });

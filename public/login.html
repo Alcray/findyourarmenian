@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in · Find Your Armenian</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #100f14;
+        color: #f6f1e8;
+      }
+
+      body {
+        align-items: center;
+        background:
+          radial-gradient(circle at top left, rgba(235, 88, 58, 0.24), transparent 30rem),
+          radial-gradient(circle at top right, rgba(53, 102, 214, 0.18), transparent 28rem),
+          #100f14;
+        display: flex;
+        justify-content: center;
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      main {
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 24px;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+        box-sizing: border-box;
+        padding: 32px;
+        width: min(440px, calc(100% - 32px));
+      }
+
+      h1 {
+        font-size: 2rem;
+        letter-spacing: -0.02em;
+        margin: 0 0 8px;
+      }
+
+      p {
+        color: #cfc7bc;
+        line-height: 1.5;
+        margin: 0 0 24px;
+      }
+
+      form {
+        display: grid;
+        gap: 12px;
+      }
+
+      label {
+        font-size: 0.9rem;
+        font-weight: 700;
+      }
+
+      input,
+      button {
+        border: 0;
+        border-radius: 16px;
+        box-sizing: border-box;
+        font: inherit;
+        padding: 14px 16px;
+        width: 100%;
+      }
+
+      input {
+        background: rgba(0, 0, 0, 0.28);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        color: #fff;
+      }
+
+      button {
+        background: #ff5b36;
+        color: #180a05;
+        cursor: pointer;
+        font-weight: 800;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.65;
+      }
+
+      #login-status {
+        color: #ffb4a3;
+        min-height: 1.5em;
+        margin: 4px 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Find Your Armenian</h1>
+      <p>This deployment is private. Enter its password to continue.</p>
+      <form id="login-form">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required autofocus />
+        <button id="login-button" type="submit">Sign in</button>
+        <p id="login-status" role="alert" aria-live="polite"></p>
+      </form>
+    </main>
+    <script type="module" src="/login.js"></script>
+  </body>
+</html>

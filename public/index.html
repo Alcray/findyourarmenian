@@ -134,6 +134,16 @@
         color: #17131b;
       }
 
+      .logout-button {
+        background: transparent;
+        color: #cfc7bc;
+        font-weight: 650;
+      }
+
+      .logout-button[hidden] {
+        display: none;
+      }
+
       .tab-panel[hidden] {
         display: none;
       }
@@ -511,6 +521,7 @@
       <nav class="top-tabs" aria-label="Main tabs">
         <button id="search-tab" class="tab-button active" type="button">Search</button>
         <button id="contacts-tab" class="tab-button" type="button">Contacts</button>
+        <button id="logout-button" class="tab-button logout-button" type="button" hidden>Log out</button>
       </nav>
 
       <section id="search-panel" class="tab-panel">

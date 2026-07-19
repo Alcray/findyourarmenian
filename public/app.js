@@ -18,6 +18,7 @@ const searchTab = document.querySelector('#search-tab');
 const contactsTab = document.querySelector('#contacts-tab');
 const searchPanel = document.querySelector('#search-panel');
 const contactsPanel = document.querySelector('#contacts-panel');
+const logoutButton = document.querySelector('#logout-button');
 const historyEl = document.querySelector('#history');
 let searchMode = 'quality';
 let funStatusTimer = null;
@@ -53,6 +54,7 @@ fastModeButton.addEventListener('click', () => setSearchMode('fast'));
 agentModeButton.addEventListener('click', () => setSearchMode('quality'));
 searchTab.addEventListener('click', () => setActiveTab('search'));
 contactsTab.addEventListener('click', () => setActiveTab('contacts'));
+logoutButton.addEventListener('click', logout);
 
 contactsSearchForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -60,7 +62,8 @@ contactsSearchForm.addEventListener('submit', (event) => {
 });
 
 async function init() {
-  await api('/api/config');
+  const appConfig = await api('/api/config');
+  logoutButton.hidden = !appConfig.authEnabled;
   await loadJobs();
   await loadHistory();
   await loadContacts();
@@ -554,12 +557,26 @@ function bindLeadForms(root) {
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
+    credentials: 'same-origin',
     headers: { 'content-type': 'application/json' },
     ...options,
   });
   const body = await response.json();
+  if (response.status === 401) {
+    window.location.replace('/login');
+    throw new Error('Your session expired. Sign in again.');
+  }
   if (!response.ok) throw new Error(body.error || 'Request failed');
   return body;
+}
+
+async function logout() {
+  logoutButton.disabled = true;
+  try {
+    await api('/api/auth/logout', { method: 'POST', body: '{}' });
+  } finally {
+    window.location.replace('/login');
+  }
 }
 
 function setBusy(isBusy, message = '') {
