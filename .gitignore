@@ -5,4 +5,5 @@ npm-debug.log*
 
 data/*.json
 data/raw-runs/
+data/.sandbox/
 !data/.gitkeep

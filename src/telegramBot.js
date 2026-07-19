@@ -19,6 +19,10 @@ if (!config.telegramBotToken) {
   console.error('TELEGRAM_BOT_TOKEN is not configured.');
   process.exit(1);
 }
+if (!config.telegramAllowedChatIds.length) {
+  console.error('TELEGRAM_ALLOWED_CHAT_IDS is required so untrusted users cannot trigger paid searches.');
+  process.exit(1);
+}
 
 console.log('Find Your Armenian Telegram bot starting...');
 await telegram('deleteWebhook', { drop_pending_updates: false });
@@ -44,6 +48,9 @@ while (true) {
 }
 
 async function handleUpdate(update) {
+  const updateChatId = update.callback_query?.message?.chat?.id || update.message?.chat?.id;
+  if (!config.telegramAllowedChatIds.includes(String(updateChatId))) return;
+
   if (update.callback_query) {
     await handleCallback(update.callback_query);
     return;

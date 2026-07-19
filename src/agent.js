@@ -31,6 +31,7 @@ export async function searchPeople({ query, refresh = false, limit, mode = 'qual
     errors: agentResult.errors,
     agent: agentResult.agent,
     resultIds: uniqueProfiles.map((profile) => profile.id),
+    resultSnapshots: uniqueProfiles,
     cached: false,
     queryCacheEnabled: false,
   };

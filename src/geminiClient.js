@@ -98,7 +98,15 @@ export async function validateCandidatesWithGemini(intent, candidates, { model }
 }
 
 async function requestCandidateJudgments(intent, candidates, model) {
-  const compactCandidates = candidates.slice(0, 16).map((candidate) => ({
+  const judgments = [];
+  for (let offset = 0; offset < candidates.length; offset += 16) {
+    judgments.push(...await requestCandidateJudgmentBatch(intent, candidates.slice(offset, offset + 16), model));
+  }
+  return judgments;
+}
+
+async function requestCandidateJudgmentBatch(intent, candidates, model) {
+  const compactCandidates = candidates.map((candidate) => ({
     id: candidate.id,
     name: candidate.name,
     headline: candidate.headline,
@@ -119,7 +127,13 @@ async function requestCandidateJudgments(intent, candidates, model) {
       sourceType: source.sourceType,
       sourceConfidence: source.sourceConfidence,
     })),
-    evidence: (candidate.evidence || []).map((item) => item.text),
+    // Evidence is retained in full on disk, but prompt size must stay bounded as
+    // the same person accumulates observations across searches.
+    evidence: (candidate.evidence || [])
+      .map((item) => String(item?.text || '').trim())
+      .filter(Boolean)
+      .slice(0, 12)
+      .map((text) => text.slice(0, 500)),
     needsVerification: Boolean(candidate.needsVerification),
   }));
 
@@ -172,7 +186,18 @@ Rules:
 - Only set matches_request false when the target company/role/location clearly does not match, or the record is obviously not a person.`;
 
   const parsed = await requestGeminiJson(prompt, { temperature: 0.1, model });
-  return Array.isArray(parsed.results) ? parsed.results : [];
+  const results = Array.isArray(parsed.results) ? parsed.results : [];
+  const expectedIds = new Set(compactCandidates.map((candidate) => candidate.id));
+  const byId = new Map(
+    results
+      .filter((result) => result && expectedIds.has(result.id))
+      .map((result) => [result.id, result]),
+  );
+  const missing = [...expectedIds].filter((id) => !byId.has(id));
+  if (missing.length) {
+    throw new Error(`Gemini omitted ${missing.length} candidate judgment${missing.length === 1 ? '' : 's'}.`);
+  }
+  return [...byId.values()];
 }
 
 async function requestSearchPlan(query, fallbackIntent, model) {
@@ -256,7 +281,7 @@ async function requestGeminiJson(prompt, { temperature, model }) {
   );
 
   if (!result.ok) {
-    throw new Error(`Gemini failed with HTTP ${result.status}: ${result.text.slice(0, 300)}`);
+    throw new Error(`Gemini failed with HTTP ${result.status}.`);
   }
 
   const payload = result.json ?? JSON.parse(result.text);
@@ -274,6 +299,10 @@ function applyJudgments(intent, candidates, judgments) {
       if (!judgment) return candidate;
 
       const score = clampScore(Number(judgment.overall_score));
+      const matchesRequest = modelBoolean(judgment.matches_request);
+      const worksAtTargetCompany = companyGated
+        ? modelBoolean(judgment.works_at_target_company)
+        : null;
       return {
         ...candidate,
         confidence: score,
@@ -281,12 +310,16 @@ function applyJudgments(intent, candidates, judgments) {
         needsVerification:
           candidate.needsVerification ||
           (candidate.sources || []).some((source) => source.sourceType === 'google-serp-unverified' && source.sourceConfidence === 'low'),
-        displayBucket: displayBucketFor(judgment),
+        displayBucket: displayBucketFor({
+          ...judgment,
+          matches_request: matchesRequest,
+          works_at_target_company: worksAtTargetCompany,
+        }),
         outreachAngle: judgment.outreach_angle || '',
         geminiJudgment: {
-          matchesRequest: Boolean(judgment.matches_request),
-          worksAtTargetCompany: judgment.works_at_target_company,
-          armenianConfidence: judgment.armenian_confidence || 'unknown',
+          matchesRequest,
+          worksAtTargetCompany,
+          armenianConfidence: enumValue(judgment.armenian_confidence, ['high', 'medium', 'low', 'unknown'], 'unknown'),
           concerns: Array.isArray(judgment.concerns) ? judgment.concerns : [],
         },
         evidence: [
@@ -304,7 +337,7 @@ function applyJudgments(intent, candidates, judgments) {
       // works_at_target_company is meaningless and must not drop candidates.
       if (companyGated && judgment.worksAtTargetCompany === false) return false;
       if (companyGated && candidate.needsVerification && judgment.worksAtTargetCompany !== true) return false;
-      if (judgment.matchesRequest === false && !candidate.company) return false;
+      if (judgment.matchesRequest === false) return false;
       if (candidate.displayBucket === 'reject') return false;
       return true;
     })
@@ -325,13 +358,26 @@ function clampScore(value) {
 }
 
 function displayBucketFor(judgment) {
+  // Explicit mismatch flags are authoritative. A contradictory free-form
+  // bucket must never keep a model-confirmed wrong company/role/location.
+  if (judgment.works_at_target_company === false || judgment.matches_request === false) return 'reject';
   if (judgment.display_bucket === 'reject') return 'reject';
   if (judgment.display_bucket === 'likely') return 'likely';
   if (judgment.display_bucket === 'possible') return 'possible';
 
-  if (judgment.works_at_target_company === false || judgment.matches_request === false) return 'reject';
   if (judgment.armenian_confidence === 'high' || judgment.armenian_confidence === 'medium') return 'likely';
   return 'possible';
+}
+
+function modelBoolean(value) {
+  if (value === true || String(value).toLowerCase() === 'true') return true;
+  if (value === false || String(value).toLowerCase() === 'false') return false;
+  return null;
+}
+
+function enumValue(value, allowed, fallback) {
+  const normalized = String(value || '').toLowerCase();
+  return allowed.includes(normalized) ? normalized : fallback;
 }
 
 function stripJsonFences(value) {

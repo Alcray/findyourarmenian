@@ -2,10 +2,9 @@ import { config } from './config.js';
 
 // Search modes are quality/cost profiles threaded through the whole pipeline.
 //
-//   quality — best possible results, cost is NOT a constraint: full LinkedIn
-//     bios, a deep surname sweep (finds Armenians who don't self-label),
-//     enrichment, more results, generous timeouts + retries, LLM planning, and
-//     the strongest model. This is the default.
+//   quality — full LinkedIn bios, wider discovery, enrichment,
+//     generous timeouts, LLM planning, and the strongest model. An optional
+//     surname sweep finds people who do not self-label, but remains cost-gated.
 //   fast — cheap: short profiles, no surname sweep, tighter timeouts, no planning.
 export function resolveMode(mode) {
   const isFast = mode === 'fast';
@@ -14,7 +13,7 @@ export function resolveMode(mode) {
       name: 'fast',
       planning: false,
       profileMode: config.apifyProfileSearchMode, // 'Short'
-      surnameSeedCount: config.apifySurnameSeedCount,
+      surnameSeedCount: 0,
       enrich: false, // fast = cheap preview; skip paid enrichment
       enrichMaxProfiles: config.apifyEnrichMaxProfiles,
       maxResults: config.apifyMaxResults,
@@ -22,6 +21,7 @@ export function resolveMode(mode) {
       webMaxResults: 5, // SERP results scraped per web query
       apifyTimeoutMs: Math.min(config.apifyRequestTimeoutMs, 60000),
       apifyRetries: 0,
+      webRetries: 0,
       geminiModel: config.geminiModel,
     };
   }
@@ -30,14 +30,21 @@ export function resolveMode(mode) {
     name: 'quality',
     planning: true,
     profileMode: 'Full', // full LinkedIn bios → richer evidence for the judge
-    surnameSeedCount: Math.max(config.apifySurnameSeedCount, 10),
-    enrich: true,
-    enrichMaxProfiles: Math.max(config.apifyEnrichMaxProfiles, 12),
-    maxResults: Math.max(config.apifyMaxResults, 20),
+    // Each surname is a separately billed profile-search page. Keep the sweep
+    // opt-in instead of surprising every quality search with 10 paid runs.
+    surnameSeedCount: config.apifySurnameSeedCount,
+    // Selecting quality mode must not override the operator's paid-run switch
+    // or silently expand the configured per-search enrichment cap.
+    enrich: config.apifyEnrichEnabled,
+    enrichMaxProfiles: config.apifyEnrichMaxProfiles,
+    // APIFY_MAX_RESULTS is an operator cap/default in both modes. Quality
+    // widens evidence collection, but must not silently expand result spend.
+    maxResults: config.apifyMaxResults,
     webQueryCount: 4, // self-label + all 3 surname batches — widen recall
     webMaxResults: 25, // scrape many more SERP results per web query
     apifyTimeoutMs: Math.max(config.apifyRequestTimeoutMs, 180000),
-    apifyRetries: 2, // reliability over cost — retry the flaky LinkedIn scraper
+    apifyRetries: 0,
+    webRetries: 0,
     geminiModel: config.geminiModelQuality,
   };
 }

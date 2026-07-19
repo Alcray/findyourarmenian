@@ -1,8 +1,10 @@
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
+import { contactToCandidate, isFreshTrustedContact, shouldPersistAsContact } from './candidatePolicy.js';
 import { config } from './config.js';
 import { inspectApifyMcpTools } from './apifyMcpClient.js';
 import { discoverCandidates } from './discovery.js';
 import { planSearchWithGemini, validateCandidatesWithGemini } from './geminiClient.js';
+import { attachDurableIdentity, mergeCandidatesByIdentity } from './merge.js';
 import { parseIntent } from './people.js';
 import { searchContacts, upsertContactsFromProfiles, upsertProfiles } from './store.js';
 
@@ -114,8 +116,13 @@ async function understandRequest(state) {
 }
 
 async function checkContactCache(state) {
-  const contacts = await searchContacts(state.intent);
-  const cacheCandidates = contacts.slice(0, state.limit || config.apifyMaxResults).map(contactToCandidate);
+  const contacts = state.refresh || config.apifyMode === 'live'
+    ? []
+    : (await searchContacts(state.intent)).filter((contact) => isFreshTrustedContact(contact, state.intent));
+  const cacheCandidates = mergeCandidatesByIdentity(contacts.map(contactToCandidate)).slice(
+    0,
+    state.limit || config.apifyMaxResults,
+  );
   return {
     cacheCandidates,
     runs: [
@@ -131,6 +138,9 @@ async function checkContactCache(state) {
 }
 
 async function discoverCandidatesNode(state) {
+  if (!state.refresh && config.apifyMode !== 'live' && (state.cacheCandidates || []).length >= state.limit) {
+    return { candidates: state.cacheCandidates, runs: [], errors: [] };
+  }
   // The Gemini plan informs intent + the visible trace; the actual discovery is
   // handled by the shared, cost-tuned pipeline (profile search + web + enrichment).
   const { candidates, runs, errors } = await discoverCandidates(state.intent, {
@@ -153,35 +163,15 @@ async function judgeAndRank(state) {
 }
 
 async function persistContacts(state) {
-  const profiles = await upsertProfiles(state.profiles || []);
-  const contacts = await upsertContactsFromProfiles(profiles, { query: state.query });
+  const observed = state.profiles || [];
+  const persisted = await upsertProfiles(observed);
+  const profiles = attachDurableIdentity(observed, persisted);
+  const contacts = await upsertContactsFromProfiles(profiles.filter(shouldPersistAsContact), { query: state.query });
   return { profiles, contacts };
 }
 
-function contactToCandidate(contact) {
-  return {
-    ...contact,
-    id: contact.id,
-    identityKey: contact.identityKey,
-    confidence: contact.confidence || Math.min(90, 45 + (contact.cacheScore || 0)),
-    confidenceLabel: contact.confidenceLabel || 'possible',
-    sources: [
-      ...(contact.sources || []),
-      {
-        url: contact.profileUrl || '',
-        title: contact.name,
-        snippet: `Loaded from contact cache. Last matched: ${contact.lastMatchedQuery || 'unknown'}`,
-        query: 'contact cache lookup',
-        actorId: 'contact-cache',
-        cached: true,
-        kind: 'contact-cache',
-      },
-    ],
-  };
-}
-
 function dedupeProfiles(profiles) {
-  return [...new Map(profiles.map((profile) => [profile.identityKey || profile.id, profile])).values()].sort(
+  return mergeCandidatesByIdentity(profiles).sort(
     (a, b) => b.confidence - a.confidence,
   );
 }

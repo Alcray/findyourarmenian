@@ -1,22 +1,41 @@
 {
-  "description": "Golden queries for pipeline-level metrics. Runs cache-first (reuses data/raw-runs fixtures) so it is reproducible and free. knownArmenianSurnames are lower-cased substrings of people we have confirmed are real Armenian matches for the query — used to measure recall. Capture fixtures once with: node bench/run.mjs --capture",
+  "description": "Semantic contracts for the offline pipeline benchmark. All people and actor responses are sanitized synthetic fixtures; the benchmark never reads runtime data or calls the network.",
   "queries": [
     {
       "id": "openai-company",
       "query": "Find Armenians who work at OpenAI",
-      "mode": "fast",
+      "mode": "quality",
       "type": "company",
       "expectCompany": "OpenAI",
-      "knownArmenianSurnames": ["hakobyan", "zokhrabyan", "grigorian", "nersisyan", "hovsepian", "ambartsumyan"],
-      "minResults": 3
+      "expectedPeople": [
+        "Aram Hakobyan",
+        "Narine Zokhrabyan",
+        "Levon Grigorian",
+        "Sona Nersisyan",
+        "Vahe Hovsepian",
+        "Ani Ambartsumyan"
+      ],
+      "rejectedPeople": ["Serine Nazaryan"],
+      "minResults": 6
     },
     {
       "id": "sf-ai-founders",
       "query": "Armenian AI founders in San Francisco",
       "mode": "fast",
       "type": "location",
-      "knownArmenianSurnames": ["bdoyan", "avagyan", "atarbekyan", "gadukyan", "archouniani", "hakobyan", "manukyan"],
-      "minResults": 4
+      "expectRole": "founder",
+      "expectLocations": ["San Francisco", "Bay Area"],
+      "expectedPeople": [
+        "Tigran Bdoyan",
+        "Anna Atarbekyan",
+        "Gevorg Gadukyan",
+        "Armen Archouniani",
+        "Susie Avagyan",
+        "Mariam Manukyan",
+        "Hayk Petrosyan"
+      ],
+      "rejectedPeople": ["Edgar Martinez", "Shahram Ghasemian", "Lilit Sargsyan", "Aram Hakobyan"],
+      "minResults": 7
     }
   ]
 }

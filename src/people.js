@@ -1,4 +1,5 @@
 import { hashValue } from './store.js';
+import { canonicalLinkedInProfileUrl } from './merge.js';
 
 // Distinctive Armenian given names. Ambiguous international names (David, Karen,
 // Maria, Anna, Robert) are deliberately excluded so a first name alone never
@@ -13,6 +14,13 @@ const ARMENIAN_FIRST_NAMES = new Set([
   'ruzan', 'satenik', 'shushan', 'siranush', 'sona', 'tatevik', 'zaruhi', 'nune',
 ]);
 
+const NON_NAME_WORDS = new Set([
+  'armenian', 'founder', 'co-founder', 'entrepreneur', 'engineer', 'engineering', 'software',
+  'developer', 'researcher', 'research', 'senior', 'product', 'manager', 'director', 'head',
+  'chief', 'officer', 'sales', 'recruiter', 'designer', 'profile', 'linkedin', 'machine',
+  'learning', 'artificial', 'intelligence', 'ai', 'ml', 'at', 'in', 'of', 'for',
+]);
+
 // Curated high-frequency Armenian surnames (Eastern + Western/diaspora spellings).
 // These rarely collide with other ethnicities, so an exact match is a strong signal (+30).
 const COMMON_ARMENIAN_SURNAMES = new Set([
@@ -25,6 +33,7 @@ const COMMON_ARMENIAN_SURNAMES = new Set([
   'kardashian', 'sarkisian', 'sarkissian', 'mardirosian', 'hovsepian', 'boghossian',
   'kasparian', 'arakelian', 'tashjian', 'ohanian', 'derderian', 'hagopian', 'manoogian',
   'mouradian', 'kevorkian', 'krikorian', 'bedrosian', 'gulbenkian', 'terzian', 'avakian',
+  'archouniani',
 ]);
 
 // Never treat these as Armenian even though they end in -ian/-yan.
@@ -38,8 +47,15 @@ const WESTERN_GIVEN_NAMES_ENDING_IAN = new Set([
 const PERSIAN_FIRST_NAMES = new Set([
   'reza', 'ali', 'mohammad', 'mohammed', 'hossein', 'hosein', 'amir', 'mehdi', 'hassan', 'hasan',
   'kazem', 'ebrahim', 'ibrahim', 'saeed', 'said', 'majid', 'vahid', 'farhad', 'kamran', 'arash',
-  'babak', 'siamak', 'nima', 'pouya', 'pedram', 'omid', 'nader', 'bahram', 'jamshid', 'kaveh',
+  'babak', 'siamak', 'nima', 'pouya', 'pedram', 'omid', 'nader', 'bahram', 'jamshid', 'kaveh', 'shahram',
   'dariush', 'maryam', 'fatemeh', 'zahra', 'shirin', 'nasrin', 'parisa', 'laleh',
+]);
+
+// Common Chinese given-name tokens which happen to end in the Latin letters
+// -yan. They are not evidence for an Armenian surname (for example, Xiaoyan).
+const CHINESE_GIVEN_NAMES_ENDING_YAN = new Set([
+  'xiaoyan', 'xinyan', 'meiyan', 'jingyan', 'jinyan', 'huiyan', 'hongyan', 'shiyan',
+  'wenyan', 'xueyan', 'qiuyan', 'ruyan', 'ziyan', 'yiyan', 'liyan', 'qinyan',
 ]);
 
 // Chinese pinyin surnames: an -ian/-yan token beside one is a Chinese given name.
@@ -107,18 +123,24 @@ const ARMENIAN_CONTEXT_TERMS = [
 ];
 
 const ROLE_PATTERNS = [
-  ['sales', /\b(sales|gtm|go.to.market|account executive|business development)\b/i],
-  ['founder', /\b(founder|co-founder|startup|entrepreneur)\b/i],
-  ['engineer', /\b(engineer|software|developer|technical|infra|platform)\b/i],
-  ['ai', /\b(ai|ml|machine learning|research|llm|model)\b/i],
+  ['founder', /\b(founders?|co[-\s]?founders?|entrepreneurs?|ceo|chief executive(?: officer)?)\b/i],
+  ['sales', /\b(sales|gtm|go.to.market|account executive|business development|partnerships?)\b/i],
+  ['engineer', /\b(engineers?|engineering|software|developers?|technical|infra|platform)\b/i],
   ['product', /\b(product|pm|product manager)\b/i],
   ['design', /\b(design|designer|ux|ui)\b/i],
   ['recruiting', /\b(recruiter|recruiting|talent)\b/i],
 ];
 
+// A domain such as AI describes what a person works on, not their job. Keeping
+// it separate means "AI founders" parses as role=founder, topics=['ai'].
+const TOPIC_PATTERNS = [
+  ['ai', /\b(ai|artificial intelligence|ml|machine learning|llms?|generative ai)\b/i],
+];
+
 export function parseIntent(query) {
   const clean = query.trim();
   const role = ROLE_PATTERNS.find(([, pattern]) => pattern.test(clean))?.[0] || '';
+  const topics = TOPIC_PATTERNS.filter(([, pattern]) => pattern.test(clean)).map(([topic]) => topic);
   const location = extractLocation(clean);
   const company = extractCompany(clean, role);
 
@@ -126,6 +148,7 @@ export function parseIntent(query) {
     originalQuery: clean,
     company,
     role,
+    topics,
     location,
     // This app always searches for Armenian people, even if the user only says
     // "find people at Google sales".
@@ -139,13 +162,14 @@ export function parseIntent(query) {
 // non-Armenians at the wrong company. Surname-OR batches only help open/location
 // recall, where there is no company to anchor affiliation.
 export function buildSearchQueries(intent) {
-  const target = [intent.company, intent.role, intent.location].filter(Boolean).join(' ').trim();
+  const topics = Array.isArray(intent.topics) ? intent.topics : [];
+  const target = [intent.company, intent.role, ...topics, intent.location].filter(Boolean).join(' ').trim();
   // One surname-OR query per batch. Google ORs surnames natively, so these catch
   // Armenians who never write "Armenian" on their profile. The self-label query
   // comes first; discovery runs as many of the rest as the mode allows.
   const surnameBatches = ARMENIAN_SURNAME_QUERY_BATCHES.map((batch) => `(${batch.join(' OR ')})`);
   const prefix = intent.company
-    ? `site:linkedin.com/in ${intent.company} ${[intent.role, intent.location].filter(Boolean).join(' ').trim()}`.trim()
+    ? `site:linkedin.com/in ${intent.company} ${[intent.role, ...topics, intent.location].filter(Boolean).join(' ').trim()}`.trim()
     : `site:linkedin.com/in ${target}`;
 
   const queries = [`${prefix} Armenian`, ...surnameBatches.map((sb) => `${prefix} ${sb}`)];
@@ -165,8 +189,16 @@ export function normalizeCandidates(items, intent, sourceQuery, metadata = {}) {
 function normalizeItem(item, intent, sourceQuery, metadata) {
   // Structured actors (harvestapi/linkedin-profile-search, enrichment) return
   // firstName/lastName + currentPositions[] instead of a flat title.
-  const structuredName = joinName(item.firstName, item.lastName);
-  const positions = Array.isArray(item.currentPositions) ? item.currentPositions : [];
+  const structuredName = joinName(item.firstName || item.first_name, item.lastName || item.last_name);
+  const currentExperiences = Array.isArray(item.experiences)
+    ? item.experiences.filter(isCurrentExperience)
+    : [];
+  const structuredCurrentPositions = Array.isArray(item.currentPositions)
+    ? item.currentPositions
+    : Array.isArray(item.currentPosition)
+      ? item.currentPosition
+      : [];
+  const positions = structuredCurrentPositions.length ? structuredCurrentPositions : currentExperiences;
   const topPosition = positions[0] || {};
   const positionTitle = textOf(topPosition.title || topPosition.position || topPosition.jobTitle || '');
   const positionCompany = textOf(topPosition.companyName || topPosition.company || '');
@@ -179,6 +211,7 @@ function normalizeItem(item, intent, sourceQuery, metadata) {
       positionTitle ||
       item.name ||
       item.fullName ||
+      item.full_name ||
       structuredName ||
       item.heading ||
       item.searchResult?.title ||
@@ -186,7 +219,7 @@ function normalizeItem(item, intent, sourceQuery, metadata) {
       '',
   );
   const employeeName = textOf(
-    item.name || item.fullName || structuredName || item.profileName || item.employeeName || '',
+    structuredName || item.name || item.fullName || item.full_name || item.profileName || item.employeeName || '',
   );
   const url = bestUrl(item);
   const searchSummary = [
@@ -209,10 +242,12 @@ function normalizeItem(item, intent, sourceQuery, metadata) {
     positionTitle,
     item.company,
     item.companyName,
+    item.company_name,
     positionCompany,
     typeof item.location === 'object' ? item.location?.linkedinText || item.location?.name : item.location,
     ...positions.map((p) => [p.title, p.companyName || p.company].filter(Boolean).map(textOf).join(' at ')),
     ...(Array.isArray(item.experience) ? item.experience.map((e) => textOf(e.title || e.company || e)) : []),
+    ...(Array.isArray(item.experiences) ? item.experiences.map((e) => textOf(e.title || e.company || e)) : []),
     ...(Array.isArray(item.education) ? item.education.map((e) => textOf(e.schoolName || e.school || e)) : []),
     ...(Array.isArray(item.skills) ? item.skills.map(textOf) : []),
     item.profileUrl,
@@ -229,16 +264,54 @@ function normalizeItem(item, intent, sourceQuery, metadata) {
 
   const linkedInUrls = [...content.matchAll(/https?:\/\/(?:[\w-]+\.)?linkedin\.com\/in\/[A-Za-z0-9_%/-]+/gi)]
     .map((match) => match[0].replace(/[),.\]]+$/, ''));
-  const primaryUrl = linkedInUrls[0] || url;
+  const rawPrimaryUrl = canonicalLinkedInProfileUrl(url) ? url : linkedInUrls[0] || url;
+  const canonicalProfileUrl = canonicalLinkedInProfileUrl(rawPrimaryUrl);
+  // Reject LinkedIn lookalike URLs instead of hashing/linking them as if they
+  // were genuine profiles. Non-LinkedIn sources (including demo URLs) remain.
+  const primaryUrl = canonicalProfileUrl || (/linkedin\.com\/in\//i.test(rawPrimaryUrl) ? '' : safeHttpUrl(rawPrimaryUrl));
   const name = looksLikeName(employeeName) ? employeeName : extractName(title, primaryUrl);
   if (!name || isLowQualityTitle(name)) return [];
 
-  const explicitCompany = extractCompanyFromText(title, content);
-  const itemCompany = companyFromEmployeeItem(item, metadata, content);
-  const company = explicitCompany || itemCompany;
-  const affiliationVerified = Boolean(explicitCompany) || hasVerifiedCompanyItem(item, metadata, content);
+  // Company affiliation is intentionally derived from current-position fields
+  // and the compact profile/search header only. Long page bodies frequently
+  // contain posts, prior jobs, and acquisition news, none of which proves that
+  // the person currently works at the company.
+  const credibleCompanyText = [title, searchSummary].filter(Boolean).join('\n');
+  const explicitCompany = extractCompanyFromText(title, searchSummary);
+  const itemCompany = companyFromEmployeeItem(item, metadata, credibleCompanyText);
+  const derivedCompany = itemCompany || explicitCompany;
+  const companyIsCurrent = Boolean(
+    derivedCompany &&
+      !hasHistoricalCompanyCue(credibleCompanyText, derivedCompany) &&
+      !hasNegatedCompanyCue(credibleCompanyText, derivedCompany),
+  );
+  const company = companyIsCurrent ? derivedCompany : '';
+  const affiliationVerified = companyIsCurrent &&
+    (hasVerifiedCompanyItem(item, metadata, credibleCompanyText) || Boolean(explicitCompany));
+  const affiliationStructured = hasStructuredCurrentCompany(item, metadata);
   const headline = cleanHeadline(title, content);
-  const location = extractLocation(content) || intent.location || '';
+  const rawLocation =
+    (typeof item.location === 'object' ? item.location?.linkedinText || item.location?.name : item.location) ||
+    item.city ||
+    '';
+  const headerLocationEvidence = [
+    title,
+    searchSummary,
+    metadata.kind === 'web-search' ? item.description : '',
+    item.demo ? item.text : '',
+  ]
+    .filter(Boolean)
+    .map(textOf)
+    .join('\n');
+  // An explicit structured location outranks a city mentioned in a headline or
+  // biography. Only fall back to header evidence when the field is absent.
+  const location = extractLocation(textOf(rawLocation)) || extractLocation(headerLocationEvidence);
+  const currentRoleText = [item.jobTitle, item.position, positionTitle].filter(Boolean).map(textOf).join(' ');
+  const roleText = currentRoleText || [item.headline, title].filter(Boolean).map(textOf).join(' ');
+  const topicText = [roleText, item.headline, item.summary, item.about, ...(Array.isArray(item.skills) ? item.skills : [])]
+    .filter(Boolean)
+    .map(textOf)
+    .join(' ');
 
   return [
     {
@@ -246,7 +319,8 @@ function normalizeItem(item, intent, sourceQuery, metadata) {
       name,
       headline,
       company,
-      role: inferRole(headline, intent.role),
+      role: inferRole(roleText),
+      topics: inferTopics(topicText),
       location,
       profileUrl: primaryUrl,
       needsVerification: item.source === 'google-serp-unverified' && item.confidence === 'low',
@@ -260,9 +334,15 @@ function normalizeItem(item, intent, sourceQuery, metadata) {
           actorId: metadata.actorId,
           cached: metadata.cached,
           demo: Boolean(item.demo || metadata.demo),
+          fixture: Boolean(item.fixture || metadata.fixture),
+          shared: Boolean(metadata.shared),
+          observedAt: metadata.observedAt || '',
           kind: metadata.kind || 'web-search',
           targetCompany: metadata.targetCompany || '',
           affiliationVerified,
+          affiliationCompany: affiliationVerified ? company : '',
+          affiliationEvidence: credibleCompanyText.slice(0, 600),
+          affiliationStructured,
           sourceConfidence: item.confidence || '',
           sourceType: item.source || '',
         },
@@ -282,22 +362,31 @@ function scoreCandidate(candidate, intent) {
     evidence.push({ type: 'company', text: `Matches target company: ${intent.company}` });
   }
 
-  if (intent.role && mentions(candidate, intent.role)) {
+  if (intent.role && candidate.role === intent.role) {
     score += 15;
     evidence.push({ type: 'role', text: `Matches target role: ${intent.role}` });
   }
 
-  if (intent.location && mentions(candidate, intent.location)) {
+  const requestedTopics = Array.isArray(intent.topics) ? intent.topics : [];
+  for (const topic of requestedTopics) {
+    if ((candidate.topics || []).includes(topic)) {
+      score += 8;
+      evidence.push({ type: 'topic', text: `Matches target topic: ${topic}` });
+    }
+  }
+
+  if (intent.location && locationMatches(candidate.location, intent.location)) {
     score += 10;
     evidence.push({ type: 'location', text: `Matches target location: ${intent.location}` });
   }
 
   if (candidate.profileUrl) score += 5;
 
-  const confidence = Math.min(100, score);
+  const confidence = Math.max(0, Math.min(100, score));
   return {
     ...candidate,
     id: `person_${hashValue(candidate.identityKey)}`,
+    armenianScore: hayScore,
     confidence,
     confidenceLabel: confidence >= 70 ? 'strong' : confidence >= 45 ? 'possible' : 'weak',
     evidence: dedupeEvidence([...candidate.evidence, ...evidence]),
@@ -305,8 +394,24 @@ function scoreCandidate(candidate, intent) {
 }
 
 function passesHardFilters(candidate, intent) {
-  if (!intent.company) return true;
-  return hasTargetCompanyEvidence(candidate, intent.company);
+  if (candidate.armenianScore < 0) return false;
+  if (intent.company && !hasTargetCompanyEvidence(candidate, intent.company)) return false;
+
+  // An open/location search has no company anchor. Do not surface people on a
+  // weak first-name hint alone; require at least likely Armenian evidence.
+  if (!intent.company && candidate.armenianScore < ARMENIAN_SURNAME_MEDIUM) return false;
+
+  if (intent.role && candidate.role !== intent.role) return false;
+
+  const requestedTopics = Array.isArray(intent.topics) ? intent.topics : [];
+  if (requestedTopics.some((topic) => !(candidate.topics || []).includes(topic))) return false;
+
+  const requestedLocations = [intent.location, ...(intent.locationAlternates || [])].filter(Boolean);
+  if (requestedLocations.length && !requestedLocations.some((location) => locationMatches(candidate.location, location))) {
+    return false;
+  }
+
+  return true;
 }
 
 function armenianEvidence(candidate, evidence) {
@@ -315,6 +420,11 @@ function armenianEvidence(candidate, evidence) {
   const firstName = nameParts[0];
   const lastName = nameParts.at(-1) || '';
   let score = 0;
+
+  if (hasNegatedArmenianIdentity(searchable)) {
+    evidence.push({ type: 'concern', text: 'Source explicitly negates Armenian identity' });
+    return -100;
+  }
 
   if (ARMENIAN_FIRST_NAMES.has(firstName)) {
     score += ARMENIAN_SURNAME_WEAK;
@@ -350,31 +460,30 @@ function armenianEvidence(candidate, evidence) {
   return score;
 }
 
-function mentions(candidate, value) {
-  if (!value) return false;
-  return searchableText(candidate).includes(value.toLowerCase());
-}
-
 function hasTargetCompanyEvidence(candidate, company) {
-  const target = company.toLowerCase();
-  if (
-    candidate.company &&
-    candidate.company.toLowerCase() === target &&
-    (candidate.sources || []).some((source) => source.affiliationVerified)
-  ) {
-    return true;
-  }
+  const target = normalizeCompany(company);
+  if (!target) return false;
 
-  const sourceText = (candidate.sources || [])
-    .map((source) => `${source.title || ''}\n${source.snippet || ''}\n${(source.context || '').slice(0, 1200)}`)
-    .join('\n');
-  const escaped = escapeRegExp(company);
-  return [
-    new RegExp(`\\b(?:experience|current|works?|working)\\s*:?\\s*(?:at|@)?\\s*${escaped}\\b`, 'i'),
-    new RegExp(`\\b(?:at|@)\\s+${escaped}\\b`, 'i'),
-    new RegExp(`\\b${escaped}\\s*[·|,-]\\s*(?:engineering|sales|product|research|gtm|ai|ml|software)\\b`, 'i'),
-    new RegExp(`\\b[A-Z][A-Za-z'.-]+(?:\\s+[A-Z][A-Za-z'.-]+){1,3}\\s+-\\s+${escaped}\\b`, 'i'),
-  ].some((pattern) => pattern.test(sourceText));
+  return (candidate.sources || []).some((source) => {
+    const sourceCompany = normalizeCompany(source.affiliationCompany || candidate.company);
+    if (sourceCompany && sourceCompany !== target) return false;
+
+    const evidenceText =
+      source.affiliationEvidence || `${source.title || ''}\n${source.snippet || ''}`;
+    if (hasHistoricalCompanyCue(evidenceText, company) || hasNegatedCompanyCue(evidenceText, company)) return false;
+
+    // A structured current-position/current-company field is the strongest
+    // evidence we receive from LinkedIn actors. An explicit, target-specific
+    // historical marker in its own header still wins over a stale field.
+    if (source.affiliationStructured && source.affiliationVerified && sourceCompany === target) return true;
+
+    // For web results, inspect only the profile/search header captured during
+    // normalization. Never scan `context`: it often contains posts or old jobs.
+    if (source.affiliationVerified && sourceCompany === target && hasCompanyTextEvidence(evidenceText, company)) {
+      return true;
+    }
+    return hasCompanyTextEvidence(evidenceText, company);
+  });
 }
 
 function searchableText(candidate) {
@@ -396,7 +505,9 @@ function searchableText(candidate) {
 }
 
 function extractCompany(query, role) {
-  const match = query.match(/\b(?:at|inside|from|works at|working at|for)\s+([a-z0-9][a-z0-9 .&-]+)/i);
+  const match = query.match(
+    /\b(?:(?:works?|working|employed)\s+(?:at|for|with)|inside|at)\s+([a-z0-9][a-z0-9 .&-]+)/i,
+  );
   if (!match) return knownCompany(query);
 
   return tidyCompany(match[1], role);
@@ -413,19 +524,29 @@ function tidyCompany(value, role) {
     .replace(/\b(?:in|near|around)\s+(?:sf|san francisco|bay area|silicon valley|yerevan|armenia|new york|nyc|london)\b.*$/i, '')
     .replace(/\b(who|that|with|and|or|near|around)\b.*$/i, '')
     .replace(/\b(people|person|someone|anyone|armenian|armenians|works|work)\b/gi, '')
+    .replace(/\b(?:in|at|for)$/i, '')
     .trim();
 
   if (role) company = company.replace(new RegExp(`\\b${role}\\b`, 'gi'), '').trim();
   return company.split(/\s+/).slice(0, 4).join(' ');
 }
 
-function extractCompanyFromText(title, content) {
-  const source = `${title}\n${content}`;
-  const match =
-    source.match(/\bExperience:\s*([^·\n|]+)/i) ||
-    source.match(/\b(?:at|@)\s+([A-Z][A-Za-z0-9 .&-]{1,40})/) ||
-    title.match(/^[^-|]+-\s*([^|·\n]{2,40})(?:\s*\||$)/);
-  return tidyCompany(match?.[1] || '', '');
+function extractCompanyFromText(title, searchSummary) {
+  const source = [title, searchSummary].filter(Boolean).join('\n');
+  const candidates = [];
+
+  for (const match of source.matchAll(/\bExperience:\s*([^·\n|]{2,60})/gi)) candidates.push(match[1]);
+  for (const match of source.matchAll(
+    /\b(?:at|@)\s+([A-Z0-9][\p{L}\p{M}A-Za-z0-9.'’& -]{1,50}?)(?=\s*(?:[·|,;\n]|$))/gu,
+  )) {
+    candidates.push(match[1]);
+  }
+
+  for (const value of candidates) {
+    const company = tidyCompany(value, '');
+    if (company && hasCompanyTextEvidence(source, company)) return company;
+  }
+  return '';
 }
 
 function extractLocation(text) {
@@ -469,7 +590,12 @@ function extractName(title, url) {
 
 function looksLikeName(value) {
   const words = value.split(/\s+/).filter(Boolean);
-  return words.length >= 2 && words.length <= 4 && words.every((word) => /^[A-Za-z'.-]+$/.test(word));
+  return (
+    words.length >= 2 &&
+    words.length <= 4 &&
+    words.every((word) => /^[\p{L}\p{M}][\p{L}\p{M}'’.-]*$/u.test(word)) &&
+    words.every((word) => !NON_NAME_WORDS.has(word.toLowerCase().replace(/[.'’]+/g, '')))
+  );
 }
 
 function isLowQualityTitle(value) {
@@ -493,13 +619,40 @@ function bestUrl(item) {
   );
 }
 
+function safeHttpUrl(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    return ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password ? parsed.href : '';
+  } catch {
+    return '';
+  }
+}
+
 function cleanHeadline(title, content) {
   if (title && !isLowQualityTitle(title)) return title;
   return firstSentence(content);
 }
 
-function inferRole(headline, fallback) {
-  return ROLE_PATTERNS.find(([, pattern]) => pattern.test(headline))?.[0] || fallback || '';
+function inferRole(headline) {
+  const currentText = textOf(headline).replace(
+    /\b(?:ex|former(?:ly)?|previously|past)\s*[-–—,:|]?\s*(?:co[-\s]?)?(?:founder|ceo|chief executive(?: officer)?|engineer|developer|sales|gtm|recruiter|designer|product manager)\b/gi,
+    ' ',
+  );
+  return ROLE_PATTERNS.find(([, pattern]) => pattern.test(currentText))?.[0] || '';
+}
+
+function inferTopics(value) {
+  return TOPIC_PATTERNS.filter(([, pattern]) => pattern.test(value)).map(([topic]) => topic);
+}
+
+function locationMatches(actual, requested) {
+  if (!actual || !requested) return false;
+  const normalizedActual = actual.toLowerCase();
+  const normalizedRequested = requested.toLowerCase();
+  if (normalizedActual === normalizedRequested) return true;
+
+  const bayArea = new Set(['san francisco', 'bay area', 'silicon valley']);
+  return bayArea.has(normalizedActual) && bayArea.has(normalizedRequested);
 }
 
 function firstSentence(value) {
@@ -511,7 +664,7 @@ function contextWindow(value) {
 }
 
 function identityKey(name, company, url) {
-  const linkedIn = url?.match(/linkedin\.com\/in\/[^/?#]+/i)?.[0].toLowerCase();
+  const linkedIn = canonicalLinkedInProfileUrl(url);
   return linkedIn || `${name}:${company}`.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
@@ -541,14 +694,18 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function companyFromEmployeeItem(item, metadata, content) {
+function companyFromEmployeeItem(item, metadata, credibleText) {
   const value =
     item.companyName ||
+    item.company_name ||
     item.company ||
     item.currentCompany ||
     item.organization ||
     item.currentPositions?.[0]?.companyName ||
     item.currentPositions?.[0]?.company ||
+    item.currentPosition?.[0]?.companyName ||
+    item.currentPosition?.[0]?.company ||
+    item.experiences?.find?.(isCurrentExperience)?.company ||
     '';
   if (!value) return '';
 
@@ -557,55 +714,147 @@ function companyFromEmployeeItem(item, metadata, content) {
   // company into a verified current employer unless the profile text supports it.
   if (item.source === 'google-serp-unverified' && item.confidence === 'low') {
     const target = metadata.targetCompany || value;
-    return hasCompanyTextEvidence(content, target) ? tidyCompany(textOf(value), '') : '';
+    return hasCompanyTextEvidence(credibleText, target) ? tidyCompany(textOf(value), '') : '';
   }
 
   return tidyCompany(textOf(value), '');
 }
 
-function hasVerifiedCompanyItem(item, metadata, content) {
+function hasVerifiedCompanyItem(item, metadata, credibleText) {
   const value =
     item.companyName ||
+    item.company_name ||
     item.company ||
     item.currentCompany ||
     item.organization ||
     item.currentPositions?.[0]?.companyName ||
     item.currentPositions?.[0]?.company ||
+    item.currentPosition?.[0]?.companyName ||
+    item.currentPosition?.[0]?.company ||
+    item.experiences?.find?.(isCurrentExperience)?.company ||
     '';
   if (!value) return false;
   if (item.source === 'google-serp-unverified' && item.confidence === 'low') {
-    return hasCompanyTextEvidence(content, metadata.targetCompany || value);
+    return hasCompanyTextEvidence(credibleText, metadata.targetCompany || value);
   }
   return true;
 }
 
-function hasCompanyTextEvidence(content, company) {
+function hasStructuredCurrentCompany(item, metadata = {}) {
+  const structuredActor = ['profile-search', 'surname-seed', 'company-employees', 'enrichment'].includes(
+    metadata.kind,
+  );
+  return Boolean(
+    item.currentCompany ||
+      item.currentPositions?.some?.((position) => position?.companyName || position?.company) ||
+      item.currentPosition?.some?.((position) => position?.companyName || position?.company) ||
+      item.experiences?.some?.((experience) => isCurrentExperience(experience) && experience?.company) ||
+      (structuredActor && (item.companyName || item.company_name || item.company)),
+  );
+}
+
+function isCurrentExperience(experience) {
+  if (!experience || typeof experience !== 'object') return false;
+  if (experience.isCurrent === true || experience.current === true) return true;
+  if (Object.hasOwn(experience, 'ends_at')) return isPresentEndValue(experience.ends_at);
+  if (Object.hasOwn(experience, 'endDate')) return isPresentEndValue(experience.endDate);
+  // Some enrichment actors omit the end field for an active position. Require
+  // an explicit start marker so a completely ambiguous historical item is not
+  // assumed current.
+  if (experience.starts_at || experience.startDate) return true;
+  return false;
+}
+
+function isPresentEndValue(value) {
+  if (!value) return true;
+  if (typeof value === 'object') return /\b(?:present|current)\b/i.test(textOf(value.text || value.label || ''));
+  return /\b(?:present|current)\b/i.test(textOf(value));
+}
+
+function hasHistoricalCompanyCue(content, company) {
   if (!company) return false;
   const escaped = escapeRegExp(company);
   return [
-    new RegExp(`\\b(?:experience|current|works?|working)\\s*:?\\s*(?:at|@)?\\s*${escaped}\\b`, 'i'),
-    new RegExp(`\\b(?:at|@)\\s+${escaped}\\b`, 'i'),
-    new RegExp(`\\b${escaped}\\s*[·|,-]\\s*(?:engineering|sales|product|research|gtm|ai|ml|software|labs?)\\b`, 'i'),
-    new RegExp(`\\b[A-Z][A-Za-z'.-]+(?:\\s+[A-Z][A-Za-z'.-]+){1,3}\\s+-\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bex\\s*[-–—,:|]?\\s*${escaped}\\b`, 'i'),
+    new RegExp(`\\bformer(?:ly)?\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bformer\\s+(?:employee|engineer|founder|researcher|executive|staff|member)(?:\\s+(?:at|of|with))?\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:formerly|previously)\\s+(?:worked|working|employed)?\\s*(?:at|with|for)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:(?:left|departed)(?:\\s+from)?|departing\\s+from)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b${escaped}\\s+(?:alum|alumni|alumnus|alumna|veteran)\\b`, 'i'),
+    new RegExp(`\\bacquired\\s+by\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b${escaped}(?:'s)?\\s+acquisition\\s+of\\b`, 'i'),
   ].some((pattern) => pattern.test(content));
+}
+
+function hasCompanyTextEvidence(content, company) {
+  if (!company || !content || hasHistoricalCompanyCue(content, company) || hasNegatedCompanyCue(content, company)) {
+    return false;
+  }
+  const escaped = escapeRegExp(company);
+  return [
+    new RegExp(`\\bExperience\\s*:\\s*${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:works?|working|employed|currently)\\s+(?:at|with|for)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:at|@)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b${escaped}\\s*[·|]\\s*(?:engineering|engineer|sales|product|research|researcher|gtm|ai|ml|software|founder|design|recruiting|operations|staff|manager|lead|director|head|vp|chief)\\b`, 'i'),
+  ].some((pattern) => pattern.test(content));
+}
+
+function hasNegatedArmenianIdentity(content) {
+  return [
+    /\bnot\s+armenian\b/i,
+    /\bnon[-\s]+armenian\b/i,
+    /\bno\s+armenian\s+(?:heritage|identity|roots|ancestry|background)\b/i,
+  ].some((pattern) => pattern.test(content));
+}
+
+function hasNegatedCompanyCue(content, company) {
+  if (!company) return false;
+  const escaped = escapeRegExp(company);
+  return [
+    new RegExp(`\\b(?:is|am|are|was|were)?\\s*(?:not|never)\\s+(?:currently\\s+)?(?:(?:working|employed)\\s+)?(?:at|with|for)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:do|does|did)\\s+not\\s+(?:work|working)\\s+(?:at|with|for)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bnever\\s+(?:worked|working|employed)\\s+(?:at|with|for|by)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bno\\s+longer\\s+(?:at|with|working\\s+(?:at|with|for))\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bnot\\s+employed\\s+(?:at|with|for|by)\\s+${escaped}\\b`, 'i'),
+  ].some((pattern) => pattern.test(content));
+}
+
+function normalizeCompany(value) {
+  return textOf(value)
+    .toLowerCase()
+    .replace(/\b(?:incorporated|inc|llc|ltd|corp|corporation)\.?$/i, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }
 
 // Tiered Armenian surname signal with disambiguation. Returns points, not a
 // boolean, so a curated surname (Hakobyan) outweighs a bare -ian ending (which
 // also appears in Persian, some Greek, and Western given names like "Julian").
 export function armenianSurnameScore(lastName, firstName = '') {
-  const s = String(lastName).toLowerCase().replace(/[^a-z]/g, '');
-  const first = String(firstName).toLowerCase().replace(/[^a-z]/g, '');
+  const rawSurname = String(lastName).normalize('NFKC').toLowerCase();
+  const armenianSurname = rawSurname.replace(/[^\p{Script=Armenian}]/gu, '');
+  if (armenianSurname.length >= 4 && /(?:յան|եան)$/u.test(armenianSurname)) {
+    return ARMENIAN_SURNAME_STRONG;
+  }
+
+  const s = rawSurname.replace(/[^a-z]/g, '');
+  const first = String(firstName).normalize('NFKC').toLowerCase().replace(/[^a-z]/g, '');
   if (s.length < 5) return 0;
 
   // Curated exact match always wins.
   if (COMMON_ARMENIAN_SURNAMES.has(s)) return ARMENIAN_SURNAME_STRONG;
 
   // The token itself is a Western given name or a Chinese surname → not Armenian.
-  if (WESTERN_GIVEN_NAMES_ENDING_IAN.has(s) || CHINESE_SURNAMES.has(s)) return 0;
+  if (
+    WESTERN_GIVEN_NAMES_ENDING_IAN.has(s) ||
+    CHINESE_SURNAMES.has(s) ||
+    CHINESE_GIVEN_NAMES_ENDING_YAN.has(s)
+  ) {
+    return 0;
+  }
 
   // Persian surnames: -ian patronymics on Persian stems, and -zadeh/-nejad/-pour/-abadi roots.
-  if (/(hossein|hosein|bahram|tehran|rahim|karim|akbar|kazem|reza|mahmoud|ahmad|abdol|gholam|mirza|sultan|mohammad|mohamed)ian$/.test(s)) {
+  if (/(hossein|hosein|bahram|tehran|rahim|karim|akbar|kazem|reza|mahmoud|ahmad|abdol|gholam|mirza|sultan|mohammad|mohamed|ghasem|qasem)ian$/.test(s)) {
     return 0;
   }
   if (/(zadeh|nejad|nezhad|pour|pur|abadi)$/.test(s)) return 0;
@@ -647,4 +896,17 @@ export function armenianNameScore(fullName) {
   let score = armenianSurnameScore(last, first);
   if (ARMENIAN_FIRST_NAMES.has(first)) score += ARMENIAN_SURNAME_WEAK;
   return score;
+}
+
+// A conservative name-only classifier for automatic persistence and metrics.
+// Distinctive first names remain useful ranking hints, but never pass this gate
+// without a likely/strong Armenian surname.
+export function hasStrongArmenianNameSignal(fullName) {
+  const parts = String(fullName || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length < 2) return false;
+  return armenianSurnameScore(parts.at(-1), parts[0]) >= ARMENIAN_SURNAME_MEDIUM;
 }

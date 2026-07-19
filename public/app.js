@@ -140,7 +140,7 @@ async function loadJobs() {
 
 function renderCompletedSearch(result) {
   const runSummary = result.runs
-    ?.map((run) => `${run.cached ? 'cached' : run.demo ? 'demo' : 'live'}: ${run.itemCount}`)
+    ?.map((run) => `${run.fixture ? 'fixture' : run.demo ? 'demo' : run.shared ? 'shared live' : run.cached ? 'cached' : 'live'}: ${run.itemCount}`)
     .join(' | ');
   const planning = result.agent?.planning;
   const validation = result.agent?.validation;
@@ -479,8 +479,9 @@ function personCard(person, lead, options = {}) {
     .map((item) => `<li>${escapeHtml(item.text)}</li>`)
     .join('');
   const source = person.sources?.[0];
-  const sourceLink = source?.url
-    ? `<a href="${escapeAttr(source.url)}" target="_blank" rel="noreferrer">Source</a>`
+  const sourceUrl = safeExternalUrl(source?.url);
+  const sourceLink = sourceUrl
+    ? `<a href="${escapeAttr(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>`
     : '<span class="muted">No source URL</span>';
 
   return `
@@ -578,6 +579,16 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
   return escapeHtml(value).replaceAll('`', '&#096;');
+}
+
+function safeExternalUrl(value) {
+  if (!value) return '';
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : '';
+  } catch {
+    return '';
+  }
 }
 
 function formatToolName(value) {

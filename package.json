@@ -7,10 +7,12 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "bot": "node src/telegramBot.js",
+    "test": "node --test",
     "validate": "node src/validate.js",
     "bench": "node bench/run.mjs",
+    "bench:gate": "node bench/run.mjs --gate",
     "bench:save": "node bench/run.mjs --save",
-    "bench:capture": "node bench/run.mjs --capture --save"
+    "bench:live": "node bench/run.mjs --live"
   },
   "engines": {
     "node": ">=20"

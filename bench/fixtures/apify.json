@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "description": "Sanitized synthetic Apify responses used only by the offline regression benchmark.",
+  "runs": [
+    {
+      "actorId": "harvestapi/linkedin-profile-search",
+      "input": {
+        "profileScraperMode": "Full",
+        "maxItems": 10,
+        "searchQuery": "Armenian",
+        "currentCompanies": ["https://www.linkedin.com/company/openai"]
+      },
+      "items": [
+        {
+          "firstName": "Aram",
+          "lastName": "Hakobyan",
+          "headline": "Research Engineer at OpenAI",
+          "currentPosition": [{ "position": "Research Engineer", "companyName": "OpenAI", "endDate": { "text": "Present" } }],
+          "location": "San Francisco Bay Area",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-aram-hakobyan"
+        },
+        {
+          "firstName": "Narine",
+          "lastName": "Zokhrabyan",
+          "headline": "Member of Technical Staff at OpenAI",
+          "currentPositions": [{ "title": "Member of Technical Staff", "companyName": "OpenAI" }],
+          "location": "San Francisco",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-narine-zokhrabyan"
+        },
+        {
+          "firstName": "Levon",
+          "lastName": "Grigorian",
+          "headline": "Applied AI Researcher at OpenAI",
+          "currentPositions": [{ "title": "Applied AI Researcher", "companyName": "OpenAI" }],
+          "location": "San Francisco Bay Area",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-levon-grigorian"
+        },
+        {
+          "firstName": "Serine",
+          "lastName": "Nazaryan",
+          "headline": "Ex - OpenAI; founder of Neptune",
+          "summary": "Neptune was acquired by OpenAI.",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-serine-nazaryan"
+        }
+      ]
+    },
+    {
+      "actorId": "apify/rag-web-browser",
+      "input": {
+        "query": "site:linkedin.com/in OpenAI Armenian",
+        "maxResults": 10,
+        "outputFormats": ["markdown", "text"],
+        "requestTimeoutSecs": 30,
+        "htmlTransformer": "readable-text"
+      },
+      "items": [
+        {
+          "searchResult": {
+            "title": "Sona Nersisyan - Product manager at OpenAI | LinkedIn",
+            "description": "Sona Nersisyan is a product manager at OpenAI and active in the Armenian community.",
+            "url": "https://www.linkedin.com/in/fixture-sona-nersisyan"
+          }
+        },
+        {
+          "searchResult": {
+            "title": "Vahe Hovsepian - Researcher at OpenAI | LinkedIn",
+            "description": "Vahe Hovsepian currently works at OpenAI; Armenian-American researcher.",
+            "url": "https://am.linkedin.com/in/fixture-vahe-hovsepian/?trk=fixture"
+          }
+        },
+        {
+          "searchResult": {
+            "title": "Ani Ambartsumyan - Engineer at OpenAI | LinkedIn",
+            "description": "Ani Ambartsumyan works at OpenAI as an engineer.",
+            "url": "https://www.linkedin.com/in/fixture-ani-ambartsumyan"
+          }
+        },
+        {
+          "searchResult": {
+            "title": "Aram Hakobyan - Research Engineer at OpenAI | LinkedIn",
+            "description": "Aram Hakobyan works at OpenAI.",
+            "url": "https://am.linkedin.com/in/FIXTURE-ARAM-HAKOBYAN/?trk=fixture"
+          }
+        },
+        {
+          "searchResult": {
+            "title": "Serine Nazaryan - Ex - OpenAI | LinkedIn",
+            "description": "Founder of Neptune; Neptune was acquired by OpenAI.",
+            "url": "https://www.linkedin.com/in/fixture-serine-nazaryan"
+          },
+          "content": "A post about OpenAI and an acquisition."
+        }
+      ]
+    },
+    {
+      "actorId": "apify/rag-web-browser",
+      "input": {
+        "query": "site:linkedin.com/in OpenAI (Hakobyan OR Sargsyan OR Grigoryan OR Harutyunyan OR Petrosyan OR Karapetyan OR Vardanyan OR Manukyan OR Hovhannisyan OR Khachatryan OR Ghazaryan OR Sarkisian)",
+        "maxResults": 10,
+        "outputFormats": ["markdown", "text"],
+        "requestTimeoutSecs": 30,
+        "htmlTransformer": "readable-text"
+      },
+      "items": []
+    },
+    {
+      "actorId": "apify/rag-web-browser",
+      "input": {
+        "query": "site:linkedin.com/in OpenAI (Martirosyan OR Avetisyan OR Stepanyan OR Gevorgyan OR Sahakyan OR Melkonyan OR Simonyan OR Galstyan OR Baghdasaryan OR Nazaryan OR Arakelyan OR Minasyan)",
+        "maxResults": 10,
+        "outputFormats": ["markdown", "text"],
+        "requestTimeoutSecs": 30,
+        "htmlTransformer": "readable-text"
+      },
+      "items": []
+    },
+    {
+      "actorId": "apify/rag-web-browser",
+      "input": {
+        "query": "site:linkedin.com/in OpenAI (Mkrtchyan OR Danielyan OR Asatryan OR Kirakosyan OR Poghosyan OR Tumanyan OR Nersisyan OR Gasparyan OR Davtyan OR Aslanyan OR Babayan OR Sedrakyan)",
+        "maxResults": 10,
+        "outputFormats": ["markdown", "text"],
+        "requestTimeoutSecs": 30,
+        "htmlTransformer": "readable-text"
+      },
+      "items": []
+    },
+    {
+      "actorId": "harvestapi/linkedin-profile-search",
+      "input": {
+        "profileScraperMode": "Short",
+        "maxItems": 10,
+        "searchQuery": "Armenian",
+        "currentJobTitles": ["Founder", "Co-Founder", "CEO"],
+        "locations": ["San Francisco"]
+      },
+      "items": [
+        {
+          "firstName": "Tigran",
+          "lastName": "Bdoyan",
+          "headline": "Co-Founder building AI developer tools",
+          "currentPositions": [{ "title": "Co-Founder", "companyName": "Fixture Labs" }],
+          "summary": "Artificial intelligence infrastructure",
+          "location": "San Francisco",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-tigran-bdoyan"
+        },
+        {
+          "firstName": "Anna",
+          "lastName": "Atarbekyan",
+          "headline": "Founder and CEO, applied AI",
+          "currentPositions": [{ "title": "Founder and CEO", "companyName": "Fixture Health" }],
+          "summary": "Machine learning for healthcare",
+          "location": "San Francisco Bay Area",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-anna-atarbekyan"
+        },
+        {
+          "firstName": "Gevorg",
+          "lastName": "Gadukyan",
+          "headline": "Founder of an AI security startup",
+          "currentPositions": [{ "title": "Founder", "companyName": "Fixture Secure" }],
+          "summary": "AI security",
+          "location": "San Francisco",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-gevorg-gadukyan"
+        },
+        {
+          "firstName": "Armen",
+          "lastName": "Archouniani",
+          "headline": "Co-Founder, generative AI",
+          "currentPositions": [{ "title": "Co-Founder", "companyName": "Fixture Studio" }],
+          "summary": "Generative AI products",
+          "location": "Bay Area",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-armen-archouniani"
+        },
+        {
+          "firstName": "Edgar",
+          "lastName": "Martinez",
+          "headline": "AI Founder",
+          "currentPositions": [{ "title": "Founder", "companyName": "Fixture Other" }],
+          "location": "San Francisco",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-edgar-martinez"
+        },
+        {
+          "firstName": "Lilit",
+          "lastName": "Sargsyan",
+          "headline": "Machine Learning Engineer",
+          "currentPositions": [{ "title": "Machine Learning Engineer", "companyName": "Fixture Systems" }],
+          "location": "San Francisco",
+          "linkedinUrl": "https://www.linkedin.com/in/fixture-lilit-sargsyan"
+        }
+      ]
+    },
+    {
+      "actorId": "apify/rag-web-browser",
+      "input": {
+        "query": "site:linkedin.com/in founder ai San Francisco Armenian",
+        "maxResults": 5,
+        "outputFormats": ["markdown", "text"],
+        "requestTimeoutSecs": 30,
+        "htmlTransformer": "readable-text"
+      },
+      "items": [
+        {
+          "searchResult": {
+            "title": "Susie Avagyan - AI Founder | LinkedIn",
+            "description": "Susie Avagyan is an Armenian-American AI founder in the San Francisco Bay Area.",
+            "url": "https://www.linkedin.com/in/fixture-susie-avagyan"
+          }
+        },
+        {
+          "searchResult": {
+            "title": "Mariam Manukyan - Co-Founder, AI | LinkedIn",
+            "description": "Mariam Manukyan is a co-founder building AI products in San Francisco.",
+            "url": "https://www.linkedin.com/in/fixture-mariam-manukyan"
+          }
+        },
+        {
+          "searchResult": {
+            "title": "Hayk Petrosyan - Founder, Artificial Intelligence | LinkedIn",
+            "description": "Hayk Petrosyan is an Armenian founder based in the Bay Area.",
+            "url": "https://www.linkedin.com/in/fixture-hayk-petrosyan"
+          }
+        },
+        {
+          "searchResult": {
+            "title": "Shahram Ghasemian - AI Founder | LinkedIn",
+            "description": "AI founder in San Francisco.",
+            "url": "https://www.linkedin.com/in/fixture-shahram-ghasemian"
+          }
+        },
+        {
+          "searchResult": {
+            "title": "Aram Hakobyan - AI Founder | LinkedIn",
+            "description": "AI founder based in New York.",
+            "url": "https://www.linkedin.com/in/fixture-aram-hakobyan-new-york"
+          }
+        }
+      ]
+    },
+    {
+      "actorId": "apify/rag-web-browser",
+      "input": {
+        "query": "site:linkedin.com/in founder ai San Francisco (Hakobyan OR Sargsyan OR Grigoryan OR Harutyunyan OR Petrosyan OR Karapetyan OR Vardanyan OR Manukyan OR Hovhannisyan OR Khachatryan OR Ghazaryan OR Sarkisian)",
+        "maxResults": 5,
+        "outputFormats": ["markdown", "text"],
+        "requestTimeoutSecs": 30,
+        "htmlTransformer": "readable-text"
+      },
+      "items": []
+    }
+  ]
+}

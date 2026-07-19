@@ -2,13 +2,21 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.js';
+import { candidateMergeKey, mergeStoredCandidate } from './merge.js';
+
+// Synthetic demo and deterministic fixture state must never share durable files
+// with live people. Namespacing the entire store prevents same-name/no-URL demo
+// records from merging into real profiles or searches.
+const storeDataDir = ['demo', 'fixture'].includes(config.apifyMode)
+  ? path.join(config.dataDir, '.sandbox', config.apifyMode)
+  : config.dataDir;
 
 const paths = {
-  contacts: path.join(config.dataDir, 'contacts.json'),
-  profiles: path.join(config.dataDir, 'profiles.json'),
-  searches: path.join(config.dataDir, 'searches.json'),
-  leads: path.join(config.dataDir, 'leads.json'),
-  rawRuns: path.join(config.dataDir, 'raw-runs'),
+  contacts: path.join(storeDataDir, 'contacts.json'),
+  profiles: path.join(storeDataDir, 'profiles.json'),
+  searches: path.join(storeDataDir, 'searches.json'),
+  leads: path.join(storeDataDir, 'leads.json'),
+  rawRuns: path.join(storeDataDir, 'raw-runs'),
 };
 
 export function hashValue(value) {
@@ -20,7 +28,7 @@ export function hashValue(value) {
 }
 
 async function ensureStore() {
-  await fs.mkdir(config.dataDir, { recursive: true });
+  await fs.mkdir(storeDataDir, { recursive: true });
   await fs.mkdir(paths.rawRuns, { recursive: true });
 }
 
@@ -41,7 +49,9 @@ async function writeJson(filePath, value) {
   await ensureStore();
   // Unique temp name so concurrent writers never collide on the same tmp file.
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.${writeSeq++}.tmp`;
-  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`);
+  // Profiles contain inferred ethnicity, contact evidence, and private lead
+  // notes. Keep new files readable only by the account running the app.
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await fs.rename(tempPath, filePath);
 }
 
@@ -158,42 +168,51 @@ export async function upsertContactsFromProfiles(profiles, context = {}) {
 
 async function upsertContactsFromProfilesLocked(profiles, context = {}) {
   const contacts = await listContacts();
-  const byKey = new Map(contacts.map((contact) => [contact.identityKey, contact]));
   const saved = [];
 
   for (const profile of profiles) {
-    const existing = byKey.get(profile.identityKey);
-    const contact = {
-      ...(existing || {}),
-      id: existing?.id || profile.id || `contact_${hashValue(profile.identityKey)}`,
-      identityKey: profile.identityKey,
-      name: profile.name,
-      headline: profile.headline || existing?.headline || '',
-      company: profile.company || existing?.company || '',
-      role: profile.role || existing?.role || '',
-      location: profile.location || existing?.location || '',
-      profileUrl: profile.profileUrl || existing?.profileUrl || '',
-      aliases: mergeStrings(existing?.aliases || [], [profile.name]),
-      tags: mergeStrings(existing?.tags || [], [
-        profile.company,
-        profile.role,
-        profile.location,
-        context.query,
-      ]),
-      sources: mergeByUrl(existing?.sources || [], profile.sources || []),
-      evidence: mergeEvidence(existing?.evidence || [], profile.evidence || []),
-      confidence: Math.max(existing?.confidence || 0, profile.confidence || 0),
-      confidenceLabel: profile.confidenceLabel || existing?.confidenceLabel || '',
-      lastMatchedQuery: context.query || existing?.lastMatchedQuery || '',
-      updatedAt: nowIso(),
-      createdAt: existing?.createdAt || nowIso(),
-    };
+    const key = candidateMergeKey(profile) || profile.identityKey;
+    const indexes = matchingRecordIndexes(contacts, key);
+    const targets = indexes.length ? indexes : [contacts.length];
+    let primary;
 
-    byKey.set(contact.identityKey, contact);
-    saved.push(contact);
+    for (const index of targets) {
+      const existing = contacts[index];
+      const combined = mergeStoredCandidate(existing, profile);
+      const timestamp = nowIso();
+      const contact = {
+        ...combined,
+        // Preserve every existing durable ID. URL-variant duplicates may be
+        // referenced by leads/search history, so collapsing them here would
+        // orphan those references.
+        id: existing?.id || profile.id || `contact_${hashValue(key)}`,
+        identityKey: combined.identityKey || key,
+        aliases: mergeStrings(combined.aliases || [], [profile.name]),
+        tags: mergeStrings(combined.tags || [], [
+          profile.company,
+          profile.role,
+          profile.location,
+          context.query,
+        ]),
+        lastMatchedQuery: context.query || existing?.lastMatchedQuery || '',
+        // Record freshness comes from the underlying actor observation, not the
+        // time this cached contact happened to be read again.
+        lastObservedAt:
+          latestSourceObservation(profile.sources) ||
+          existing?.lastObservedAt ||
+          existing?.updatedAt ||
+          timestamp,
+        updatedAt: timestamp,
+        createdAt: existing?.createdAt || timestamp,
+      };
+      contacts[index] = contact;
+      primary ||= contact;
+    }
+
+    saved.push(primary);
   }
 
-  await writeJson(paths.contacts, [...byKey.values()]);
+  await writeJson(paths.contacts, contacts);
   return saved;
 }
 
@@ -203,51 +222,44 @@ export async function upsertProfiles(candidates) {
 
 async function upsertProfilesLocked(candidates) {
   const profiles = await listProfiles();
-  const byKey = new Map(profiles.map((profile) => [profile.identityKey, profile]));
   const saved = [];
 
   for (const candidate of candidates) {
-    const existing = byKey.get(candidate.identityKey);
-    const merged = existing
-      ? {
-          ...existing,
-          ...candidate,
-          sources: mergeByUrl(existing.sources || [], candidate.sources || []),
-          evidence: mergeEvidence(existing.evidence || [], candidate.evidence || []),
-          updatedAt: nowIso(),
-        }
-      : {
-          ...candidate,
-          id: candidate.id || `person_${hashValue(candidate.identityKey)}`,
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-        };
+    const key = candidateMergeKey(candidate) || candidate.identityKey;
+    const indexes = matchingRecordIndexes(profiles, key);
+    const targets = indexes.length ? indexes : [profiles.length];
+    let primary;
 
-    byKey.set(merged.identityKey, merged);
-    saved.push(merged);
+    for (const index of targets) {
+      const existing = profiles[index];
+      const combined = mergeStoredCandidate(existing, candidate);
+      const timestamp = nowIso();
+      const merged = {
+        ...combined,
+        id: existing?.id || candidate.id || `person_${hashValue(key)}`,
+        identityKey: combined.identityKey || key,
+        createdAt: existing?.createdAt || candidate.createdAt || timestamp,
+        updatedAt: timestamp,
+      };
+      profiles[index] = merged;
+      primary ||= merged;
+    }
+
+    saved.push(primary);
   }
 
-  await writeJson(paths.profiles, [...byKey.values()]);
+  await writeJson(paths.profiles, profiles);
   return saved;
 }
 
-function mergeByUrl(left, right) {
-  const merged = new Map();
-  for (const item of [...left, ...right]) {
-    const key = item.url || hashValue(item);
-    merged.set(key, { ...merged.get(key), ...item });
+function matchingRecordIndexes(records, key) {
+  const indexes = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    const recordKey = candidateMergeKey(record) || record.identityKey || record.id;
+    if (recordKey === key) indexes.push(index);
   }
-  return [...merged.values()];
-}
-
-function mergeEvidence(left, right) {
-  const seen = new Set();
-  return [...left, ...right].filter((item) => {
-    const key = `${item.type}:${item.text}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return indexes;
 }
 
 function mergeStrings(left, right) {
@@ -290,15 +302,63 @@ function contactCacheScore(contact, queryParts, intent) {
 }
 
 function hasVerifiedContactCompanyEvidence(contact, company) {
-  const target = String(company).toLowerCase();
-  if (contact.company?.toLowerCase() !== target) return false;
+  const target = normalizeCompany(company);
+  if (normalizeCompany(contact.company) !== target) return false;
 
   return (contact.sources || []).some((source) => {
     if (source.kind === 'contact-cache') return false;
-    if (source.affiliationVerified) return true;
-    const text = `${source.title || ''} ${source.snippet || ''}`.toLowerCase();
-    return text.includes(target);
+    const text = `${source.title || ''} ${source.snippet || ''} ${source.affiliationEvidence || ''}`;
+    if (hasHistoricalOrNegatedCompanyCue(text, company)) return false;
+
+    const affiliations = [source.affiliationCompany, ...(source.affiliationCompanies || [])]
+      .map(normalizeCompany)
+      .filter(Boolean);
+    if (source.affiliationVerified && affiliations.length) return affiliations.includes(target);
+
+    const escaped = escapeRegExp(company);
+    return [
+      new RegExp(`\\bExperience\\s*:\\s*${escaped}\\b`, 'i'),
+      new RegExp(`\\b(?:works?|working|employed|currently)\\s+(?:at|with|for)\\s+${escaped}\\b`, 'i'),
+      new RegExp(`\\b(?:at|@)\\s+${escaped}\\b`, 'i'),
+    ].some((pattern) => pattern.test(text));
   });
+}
+
+function hasHistoricalOrNegatedCompanyCue(text, company) {
+  const escaped = escapeRegExp(company);
+  return [
+    new RegExp(`\\b(?:ex|former(?:ly)?|previously)\\s*[-–—,:|]?(?:\\s+(?:at|with|for))?\\s*${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:(?:left|departed)(?:\\s+from)?|departing\\s+from)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bno\\s+longer\\s+(?:at|with|working\\s+(?:at|with|for))\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:is|am|are|was|were)?\\s*(?:not|never)\\s+(?:currently\\s+)?(?:(?:working|employed)\\s+)?(?:at|with|for)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:do|does|did)\\s+not\\s+(?:work|working)\\s+(?:at|with|for)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bnever\\s+(?:worked|working|employed)\\s+(?:at|with|for|by)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bnot\\s+employed\\s+(?:at|with|for|by)\\s+${escaped}\\b`, 'i'),
+  ].some((pattern) => pattern.test(text));
+}
+
+function latestSourceObservation(sources) {
+  const timestamps = (sources || [])
+    .flatMap((source) => [
+      source?.observedAt,
+      ...(source?.observations || []).map((observation) => observation?.observedAt),
+    ])
+    .filter((value) => Number.isFinite(Date.parse(value)))
+    .map(String)
+    .sort();
+  return timestamps.at(-1) || '';
+}
+
+function normalizeCompany(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\b(?:incorporated|inc|llc|ltd|corp|corporation)\.?$/i, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export async function getSearch(searchKey) {
