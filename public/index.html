@@ -115,39 +115,6 @@
         font-size: 0.95rem;
       }
 
-      .top-tabs {
-        display: flex;
-        justify-content: center;
-        gap: 8px;
-        margin: 0 auto 18px;
-      }
-
-      .tab-button {
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.08);
-        color: #cfc7bc;
-        padding: 10px 18px;
-      }
-
-      .tab-button.active {
-        background: #f6f1e8;
-        color: #17131b;
-      }
-
-      .logout-button {
-        background: transparent;
-        color: #cfc7bc;
-        font-weight: 650;
-      }
-
-      .logout-button[hidden] {
-        display: none;
-      }
-
-      .tab-panel[hidden] {
-        display: none;
-      }
-
       .mode-row {
         display: flex;
         flex-wrap: wrap;
@@ -336,44 +303,6 @@
         padding: 0 16px 16px;
       }
 
-      .section-heading {
-        display: flex;
-        align-items: end;
-        justify-content: space-between;
-        gap: 12px;
-        margin: 28px 0 14px;
-      }
-
-      .section-heading h2 {
-        margin: 0;
-      }
-
-      .history-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
-        margin-bottom: 24px;
-      }
-
-      .history-card {
-        text-align: left;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 18px;
-        padding: 14px;
-        background: rgba(255, 255, 255, 0.06);
-        color: #f6f1e8;
-      }
-
-      .history-card strong {
-        display: block;
-        margin-bottom: 8px;
-        line-height: 1.25;
-      }
-
-      .history-card .muted {
-        font-size: 0.85rem;
-      }
-
       .card {
         padding: 18px;
         min-height: 390px;
@@ -485,26 +414,30 @@
         gap: 10px;
       }
 
-      .lead-form {
-        display: grid;
-        grid-template-columns: 1fr 1.25fr;
-        gap: 10px;
-      }
-
-      .lead-form button {
-        grid-column: 1 / -1;
-        justify-self: start;
-      }
-
       a {
         color: #89b4ff;
       }
 
-      textarea {
-        min-height: 72px;
-        resize: vertical;
-        width: 100%;
-        box-sizing: border-box;
+      .site-footer {
+        max-width: 880px;
+        margin: 48px auto 0;
+        padding-top: 22px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        color: #bdb4a8;
+        font-size: 0.84rem;
+        line-height: 1.55;
+      }
+
+      .site-footer p {
+        margin: 0 0 10px;
+      }
+
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
       }
 
       @media (max-width: 720px) {
@@ -517,14 +450,7 @@
   <body>
     <main>
       <h1>Find Your Armenian</h1>
-
-      <nav class="top-tabs" aria-label="Main tabs">
-        <button id="search-tab" class="tab-button active" type="button">Search</button>
-        <button id="contacts-tab" class="tab-button" type="button">Contacts</button>
-        <button id="logout-button" class="tab-button logout-button" type="button" hidden>Log out</button>
-      </nav>
-
-      <section id="search-panel" class="tab-panel">
+      <section>
         <section class="panel">
           <form id="search-form">
             <input
@@ -538,12 +464,9 @@
           </form>
           <div class="mode-row">
             <div class="segmented" aria-label="Search mode">
-              <button id="fast-mode" class="mode-button" type="button" title="Cheap: fewer sources, short profiles">Fast</button>
-              <button id="agent-mode" class="mode-button active" type="button" title="Best results, cost no object: surname sweep, full profiles, enrichment, planning">Quality</button>
+              <button id="fast-mode" class="mode-button" type="button" title="Quicker search using fewer sources and shorter profiles">Fast</button>
+              <button id="agent-mode" class="mode-button active" type="button" title="Broader search with planning, validation, and enrichment">Quality</button>
             </div>
-          <div class="controls">
-            <label><input id="refresh" type="checkbox" /> Ignore cached tool results</label>
-          </div>
           </div>
         </section>
 
@@ -557,25 +480,22 @@
           <div id="agent-trace-body" class="trace-body"></div>
         </details>
         <section id="results" class="grid"></section>
-
-        <div class="section-heading">
-          <h2>History</h2>
-          <span class="muted">Recent searches</span>
-        </div>
-        <section id="history" class="history-grid"></section>
       </section>
 
-      <section id="contacts-panel" class="tab-panel" hidden>
-        <div class="section-heading">
-          <h2>Your Armenian Network</h2>
-          <span id="contacts-count" class="muted">Everyone found so far — grows with every search</span>
+      <footer class="site-footer">
+        <p>
+          Privacy: this site uses a first-party random browser identifier. It is pseudonymous—it identifies
+          a browser, not a person or account. Aggregate page views,
+          search attempts, outcomes, and source clicks may be retained for up to 90 days. Searches
+          themselves are processed and stored server-side for caching and product operation. Analytics
+          do not store names, email addresses, raw IP addresses, or browser fingerprints. Global Privacy
+          Control and Do Not Track are respected for optional page-view and source-click analytics.
+        </p>
+        <div class="footer-links">
+          <span>Verify public-profile information before contacting anyone.</span>
+          <a href="/admin">Admin</a>
         </div>
-        <form id="contacts-search-form" class="panel" style="margin-bottom:18px">
-          <input id="contacts-search" name="q" placeholder="Search the list by name, company, role, or location" autocomplete="off" />
-          <button type="submit">Search list</button>
-        </form>
-        <section id="contacts" class="grid"></section>
-      </section>
+      </footer>
     </main>
 
     <script type="module" src="/app.js"></script>

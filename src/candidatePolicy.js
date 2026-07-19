@@ -30,16 +30,29 @@ function isLocalDataMode() {
 }
 
 export function contactToCandidate(contact) {
+  const {
+    geminiJudgment: _geminiJudgment,
+    lastMatchedQuery: _lastMatchedQuery,
+    outreachAngle: _outreachAngle,
+    tags: _tags,
+    ...candidate
+  } = contact;
   return {
-    ...contact,
+    ...candidate,
     confidence: contact.confidence || Math.min(90, 45 + (contact.cacheScore || 0)),
     confidenceLabel: contact.confidenceLabel || 'possible',
     sources: [
-      ...(contact.sources || []),
+      ...(contact.sources || []).map((source) => source?.kind === 'contact-cache'
+        ? {
+            ...source,
+            snippet: 'Loaded from the reusable contact cache.',
+            query: 'contact cache lookup',
+          }
+        : source),
       {
         url: contact.profileUrl || '',
         title: contact.name,
-        snippet: `Loaded from contact cache. Last matched: ${contact.lastMatchedQuery || 'unknown'}`,
+        snippet: 'Loaded from the reusable contact cache.',
         query: 'contact cache lookup',
         actorId: 'contact-cache',
         cached: true,

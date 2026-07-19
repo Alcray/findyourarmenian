@@ -1,29 +1,19 @@
 const form = document.querySelector('#search-form');
 const queryInput = document.querySelector('#query');
-const refreshInput = document.querySelector('#refresh');
 const searchButton = document.querySelector('#search-button');
 const statusEl = document.querySelector('#status');
 const resultsEl = document.querySelector('#results');
-const contactsEl = document.querySelector('#contacts');
-const contactsSearchForm = document.querySelector('#contacts-search-form');
-const contactsSearchInput = document.querySelector('#contacts-search');
-const contactsCountEl = document.querySelector('#contacts-count');
 const jobsEl = document.querySelector('#jobs');
 const traceEl = document.querySelector('#agent-trace');
 const traceSummaryEl = document.querySelector('#agent-trace-summary');
 const traceBodyEl = document.querySelector('#agent-trace-body');
 const fastModeButton = document.querySelector('#fast-mode');
 const agentModeButton = document.querySelector('#agent-mode');
-const searchTab = document.querySelector('#search-tab');
-const contactsTab = document.querySelector('#contacts-tab');
-const searchPanel = document.querySelector('#search-panel');
-const contactsPanel = document.querySelector('#contacts-panel');
-const logoutButton = document.querySelector('#logout-button');
-const historyEl = document.querySelector('#history');
 let searchMode = 'quality';
 let funStatusTimer = null;
 let funStatusIndex = 0;
 let activeJobId = '';
+let appReady = false;
 const jobPollers = new Map();
 
 const funnySearchStages = [
@@ -52,24 +42,12 @@ form.addEventListener('submit', async (event) => {
 
 fastModeButton.addEventListener('click', () => setSearchMode('fast'));
 agentModeButton.addEventListener('click', () => setSearchMode('quality'));
-searchTab.addEventListener('click', () => setActiveTab('search'));
-contactsTab.addEventListener('click', () => setActiveTab('contacts'));
-logoutButton.addEventListener('click', logout);
-
-contactsSearchForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  loadContacts(contactsSearchInput.value.trim());
-});
-
-async function init() {
-  const appConfig = await api('/api/config');
-  logoutButton.hidden = !appConfig.authEnabled;
-  await loadJobs();
-  await loadHistory();
-  await loadContacts();
-}
 
 async function runSearch() {
+  if (!appReady) {
+    statusEl.textContent = 'The search service is still connecting. Please try again in a moment.';
+    return;
+  }
   const query = queryInput.value.trim();
   if (!query) return;
 
@@ -79,7 +57,7 @@ async function runSearch() {
       method: 'POST',
       body: JSON.stringify({
         query,
-        refresh: refreshInput.checked,
+        refresh: false,
         mode: searchMode,
       }),
     });
@@ -130,18 +108,8 @@ function pollJob(jobId) {
   jobPollers.set(jobId, interval);
 }
 
-async function loadJobs() {
-  const result = await api('/api/jobs');
-  jobsEl.innerHTML = '';
-  for (const job of result.jobs.reverse()) {
-    renderJob(job);
-    if (job.status === 'queued' || job.status === 'running') {
-      pollJob(job.id);
-    }
-  }
-}
-
 function renderCompletedSearch(result) {
+  const visibleResultCount = (result.results || []).filter((person) => person.displayBucket !== 'reject').length;
   const runSummary = result.runs
     ?.map((run) => `${run.fixture ? 'fixture' : run.demo ? 'demo' : run.shared ? 'shared live' : run.cached ? 'cached' : 'live'}: ${run.itemCount}`)
     .join(' | ');
@@ -154,14 +122,13 @@ function renderCompletedSearch(result) {
     : validation?.error || planning?.error
       ? ` Agent note: ${validation?.error || planning?.error}`
       : '';
-  statusEl.textContent = `Found ${result.results.length} candidates. ${runSummary || ''}${agentSummary}`;
+  statusEl.textContent = `Found ${visibleResultCount} verified candidate${visibleResultCount === 1 ? '' : 's'}. ${runSummary || ''}${agentSummary}`;
   if (result.mode !== 'fast') {
     renderAgentTrace(result);
   } else {
     hideAgentTrace();
   }
   renderPeople(result.results, resultsEl);
-  loadHistory();
 }
 
 function renderJob(job) {
@@ -210,16 +177,6 @@ function removeJobCard(jobId) {
 
 function dismissJob(jobId) {
   api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' }).catch(() => {});
-}
-
-function setActiveTab(tab) {
-  const isSearch = tab === 'search';
-  searchTab.classList.toggle('active', isSearch);
-  contactsTab.classList.toggle('active', !isSearch);
-  searchPanel.hidden = !isSearch;
-  contactsPanel.hidden = isSearch;
-  // Refresh the list each time it's opened so newly found people show up.
-  if (!isSearch) loadContacts(contactsSearchInput.value.trim());
 }
 
 function setSearchMode(mode) {
@@ -402,69 +359,6 @@ function renderAgentTrace(result) {
   `;
 }
 
-async function loadContacts(q = '') {
-  const result = await api(`/api/contacts${q ? `?q=${encodeURIComponent(q)}` : ''}`);
-  contactsCountEl.textContent = q
-    ? `${result.total} match "${q}"`
-    : `${result.total} found so far — grows with every search`;
-  if (!result.contacts.length) {
-    contactsEl.innerHTML = q
-      ? '<p class="muted">No one in your list matches that yet.</p>'
-      : '<p class="muted">No contacts yet. Run a search — everyone found lands here automatically.</p>';
-    return;
-  }
-  contactsEl.innerHTML = result.contacts.map((contact) => personCard(contact, contact.lead)).join('');
-  bindLeadForms(contactsEl);
-}
-
-async function loadHistory() {
-  const result = await api('/api/searches');
-  if (!result.searches.length) {
-    historyEl.innerHTML = '<p class="muted">No searches yet.</p>';
-    return;
-  }
-
-  historyEl.innerHTML = result.searches
-    .map((search) => `
-      <button class="history-card" type="button" data-key="${escapeAttr(search.searchKey)}" data-query="${escapeAttr(search.query)}" data-mode="${escapeAttr(search.mode || 'fast')}">
-        <strong>${escapeHtml(search.query)}</strong>
-        <div class="tags">
-          <span class="pill">${escapeHtml(search.mode || 'fast')}</span>
-          <span class="pill">${Number(search.resultCount || 0)} results</span>
-        </div>
-        <div class="muted">${escapeHtml(formatRelativeTime(search.updatedAt))}</div>
-      </button>
-    `)
-    .join('');
-
-  historyEl.querySelectorAll('.history-card').forEach((card) => {
-    card.addEventListener('click', async () => {
-      queryInput.value = card.dataset.query || '';
-      setSearchMode(card.dataset.mode === 'fast' ? 'fast' : 'quality');
-      setActiveTab('search');
-      await loadSearchFromHistory(card.dataset.key);
-    });
-  });
-}
-
-async function loadSearchFromHistory(searchKey) {
-  if (!searchKey) return;
-  setBusy(true, 'Loading history...');
-  resultsEl.innerHTML = '';
-  hideAgentTrace();
-
-  try {
-    const result = await api(`/api/searches/${encodeURIComponent(searchKey)}`);
-    statusEl.textContent = `Loaded from history with ${result.results.length} candidates.`;
-    if (result.mode !== 'fast') renderAgentTrace(result);
-    renderPeople(result.results, resultsEl);
-  } catch (error) {
-    statusEl.textContent = error.message;
-  } finally {
-    setBusy(false);
-  }
-}
-
 function renderPeople(people, container) {
   if (!people.length) {
     container.innerHTML = '<p class="muted">No candidates found yet. Try a company, role, and Armenian keyword.</p>';
@@ -472,11 +366,15 @@ function renderPeople(people, container) {
   }
 
   const visiblePeople = people.filter((person) => person.displayBucket !== 'reject');
-  container.innerHTML = visiblePeople.map((person) => personCard(person, person.lead)).join('');
-  bindLeadForms(container);
+  if (!visiblePeople.length) {
+    container.innerHTML = '<p class="muted">No verified candidates found. Try a company, role, and Armenian keyword.</p>';
+    return;
+  }
+  container.innerHTML = visiblePeople.map((person) => personCard(person)).join('');
+  bindSourceTracking(container);
 }
 
-function personCard(person, lead, options = {}) {
+function personCard(person) {
   const evidence = (person.evidence || [])
     .slice(0, 3)
     .map((item) => `<li>${escapeHtml(item.text)}</li>`)
@@ -484,7 +382,7 @@ function personCard(person, lead, options = {}) {
   const source = person.sources?.[0];
   const sourceUrl = safeExternalUrl(source?.url);
   const sourceLink = sourceUrl
-    ? `<a href="${escapeAttr(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>`
+    ? `<a href="${escapeAttr(sourceUrl)}" target="_blank" rel="noopener noreferrer" data-result-source>Source</a>`
     : '<span class="muted">No source URL</span>';
 
   return `
@@ -498,7 +396,6 @@ function personCard(person, lead, options = {}) {
           <span class="pill ${isLikelyArmenian(person) ? 'pill-strong' : 'pill-possible'}">${isLikelyArmenian(person) ? 'likely Armenian' : 'possible lead'}</span>
           ${person.company ? `<span class="pill">${escapeHtml(person.company)}</span>` : ''}
           ${person.location ? `<span class="pill">${escapeHtml(person.location)}</span>` : ''}
-          ${lead ? `<span class="pill">${escapeHtml(lead.status)}</span>` : ''}
           ${source?.demo ? '<span class="pill">demo</span>' : ''}
           ${source?.cached ? '<span class="pill">cached</span>' : ''}
         </div>
@@ -506,22 +403,12 @@ function personCard(person, lead, options = {}) {
 
       <div class="evidence-box">
         <ul>${evidence || '<li>Limited evidence. Verify before outreach.</li>'}</ul>
-        ${options.review ? '<p class="muted">Shown for recall. Verify before outreach.</p>' : ''}
       </div>
 
       ${person.outreachAngle ? `<p class="outreach"><strong>Outreach:</strong> ${escapeHtml(person.outreachAngle)}</p>` : '<p class="outreach muted">No outreach angle yet.</p>'}
 
       <div class="card-footer">
         <p>${sourceLink}</p>
-        <form class="lead-form" data-person-id="${escapeAttr(person.id)}">
-          <select name="status">
-            ${['saved', 'contacted', 'helped', 'not relevant']
-              .map((status) => `<option value="${status}" ${lead?.status === status ? 'selected' : ''}>${status}</option>`)
-              .join('')}
-          </select>
-          <textarea name="notes" placeholder="Notes or warm intro idea">${escapeHtml(lead?.notes || '')}</textarea>
-          <button class="secondary" type="submit">Save lead</button>
-        </form>
       </div>
     </article>
   `;
@@ -536,23 +423,24 @@ function isLikelyArmenian(person) {
   return /armenian|armenia|yerevan|hayastan|surname has common armenian|first name has armenian/.test(evidence);
 }
 
-function bindLeadForms(root) {
-  root.querySelectorAll('.lead-form').forEach((leadForm) => {
-    leadForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const data = new FormData(leadForm);
-      await api('/api/leads', {
+function bindSourceTracking(root) {
+  if (optionalAnalyticsDisabled()) return;
+  root.querySelectorAll('[data-result-source]').forEach((sourceLink) => {
+    sourceLink.addEventListener('click', () => {
+      fetch('/api/events/result-open', {
         method: 'POST',
-        body: JSON.stringify({
-          personId: leadForm.dataset.personId,
-          status: data.get('status'),
-          notes: data.get('notes'),
-        }),
-      });
-      await loadContacts(contactsSearchInput.value.trim());
-      statusEl.textContent = 'Saved to your list.';
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+        keepalive: true,
+      }).catch(() => {});
     });
   });
+}
+
+function optionalAnalyticsDisabled() {
+  const doNotTrack = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+  return navigator.globalPrivacyControl === true || doNotTrack === '1' || doNotTrack === 'yes';
 }
 
 async function api(url, options = {}) {
@@ -561,22 +449,9 @@ async function api(url, options = {}) {
     headers: { 'content-type': 'application/json' },
     ...options,
   });
-  const body = await response.json();
-  if (response.status === 401) {
-    window.location.replace('/login');
-    throw new Error('Your session expired. Sign in again.');
-  }
+  const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || 'Request failed');
   return body;
-}
-
-async function logout() {
-  logoutButton.disabled = true;
-  try {
-    await api('/api/auth/logout', { method: 'POST', body: '{}' });
-  } finally {
-    window.location.replace('/login');
-  }
 }
 
 function setBusy(isBusy, message = '') {
@@ -612,20 +487,19 @@ function formatToolName(value) {
   return String(value || 'unknown tool').replaceAll('_', ' ');
 }
 
-function formatRelativeTime(value) {
-  if (!value) return '';
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return '';
-  const diff = Date.now() - timestamp;
-  const minutes = Math.round(diff / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
+// Establish the random first-party browser cookie and record an optional page view.
+// The server observes GPC/DNT headers and skips the page-view counter when set.
+async function init() {
+  searchButton.disabled = true;
+  statusEl.textContent = 'Connecting to the search service…';
+  try {
+    await api('/api/config');
+    appReady = true;
+    statusEl.textContent = '';
+    searchButton.disabled = false;
+  } catch (error) {
+    statusEl.textContent = error.message || 'The search service is unavailable. Refresh to try again.';
+  }
 }
 
-init().catch((error) => {
-  statusEl.textContent = error.message;
-});
+init();

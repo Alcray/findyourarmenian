@@ -64,7 +64,7 @@ if (Boolean(authPassword) !== Boolean(authSessionSecret)) {
   throw new Error('AUTH_PASSWORD and AUTH_SESSION_SECRET must be configured together.');
 }
 if (hostedRuntime && (!authPassword || !authSessionSecret)) {
-  throw new Error('Authentication is required in production. Configure AUTH_PASSWORD and AUTH_SESSION_SECRET.');
+  throw new Error('Admin authentication is required in production. Configure AUTH_PASSWORD and AUTH_SESSION_SECRET.');
 }
 if (authPassword && authPassword.length < 16) {
   throw new Error('AUTH_PASSWORD must contain at least 16 characters.');
@@ -89,6 +89,11 @@ export const config = {
   authCookieSecure: boolEnv('AUTH_COOKIE_SECURE', hostedRuntime),
   authMaxFailures: boundedIntEnv('AUTH_MAX_FAILURES', 10, 3, 100),
   authFailureWindowSeconds: boundedIntEnv('AUTH_FAILURE_WINDOW_SECONDS', 15 * 60, 60, 24 * 60 * 60),
+  analyticsRetentionDays: boundedIntEnv('ANALYTICS_RETENTION_DAYS', 90, 1, 365),
+  publicSearchesPerVisitorPerDay: boundedIntEnv('PUBLIC_SEARCHES_PER_VISITOR_PER_DAY', 3, 1, 100),
+  publicSearchesGlobalPerDay: boundedIntEnv('PUBLIC_SEARCHES_GLOBAL_PER_DAY', 25, 1, 10000),
+  searchHistoryMaxEntries: boundedIntEnv('SEARCH_HISTORY_MAX_ENTRIES', 500, 50, 5000),
+  rawRunCacheMaxFiles: boundedIntEnv('RAW_RUN_CACHE_MAX_FILES', 500, 50, 5000),
   dataDir: path.resolve(rootDir, process.env.DATA_DIR || './data'),
   apifyToken: process.env.APIFY_TOKEN || '',
   apifyMode: process.env.APIFY_MODE || 'cache-first',
@@ -141,7 +146,13 @@ export const config = {
 
 export function publicConfig(runtimeConfig = config) {
   return {
-    authEnabled: Boolean(runtimeConfig.authPassword && runtimeConfig.authSessionSecret),
+    adminAuthEnabled: Boolean(runtimeConfig.authPassword && runtimeConfig.authSessionSecret),
+    pseudonymousAnalytics: true,
+    analyticsRetentionDays: runtimeConfig.analyticsRetentionDays,
+    publicSearchLimits: {
+      perVisitorPerDay: runtimeConfig.publicSearchesPerVisitorPerDay,
+      globalPerDay: runtimeConfig.publicSearchesGlobalPerDay,
+    },
     mode: runtimeConfig.apifyMode,
     hasApifyToken: Boolean(runtimeConfig.apifyToken),
     searchActor: runtimeConfig.apifySearchActor,

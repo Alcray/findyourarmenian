@@ -18,7 +18,7 @@ form.addEventListener('submit', async (event) => {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || 'Sign-in failed.');
     passwordInput.value = '';
-    window.location.replace('/');
+    window.location.replace('/admin');
   } catch (error) {
     statusEl.textContent = error.message || 'Sign-in failed.';
     passwordInput.select();

@@ -17,13 +17,13 @@ function importConfig(env = {}, source = "await import('./src/config.js')") {
   });
 }
 
-test('authentication can remain disabled locally but fails closed in production', () => {
+test('admin authentication can remain disabled locally but fails closed in production', () => {
   const local = importConfig({ NODE_ENV: '', RAILWAY_ENVIRONMENT: '', RAILWAY_PUBLIC_DOMAIN: '' });
   assert.equal(local.status, 0, local.stderr);
 
   const production = importConfig({ NODE_ENV: 'production', RAILWAY_ENVIRONMENT: '', RAILWAY_PUBLIC_DOMAIN: '' });
   assert.notEqual(production.status, 0);
-  assert.match(production.stderr, /Authentication is required in production/);
+  assert.match(production.stderr, /Admin authentication is required in production/);
 });
 
 test('Railway domains are added to the request Host allowlist automatically', () => {

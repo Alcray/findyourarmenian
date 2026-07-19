@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <title>Owner analytics · Find Your Armenian</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #100f14;
+        color: #f6f1e8;
+        font-synthesis: none;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 8% 0, rgba(235, 88, 58, 0.2), transparent 31rem),
+          radial-gradient(circle at 92% 4%, rgba(53, 102, 214, 0.16), transparent 30rem),
+          #100f14;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      button {
+        border: 0;
+        font: inherit;
+      }
+
+      button:focus-visible,
+      a:focus-visible {
+        outline: 3px solid rgba(255, 174, 153, 0.8);
+        outline-offset: 3px;
+      }
+
+      .shell {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 28px 0 52px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding-bottom: 36px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #f6f1e8;
+        text-decoration: none;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 13px;
+        background: linear-gradient(145deg, #ff7555, #e94725);
+        box-shadow: 0 12px 28px rgba(235, 88, 58, 0.2);
+        color: #210b06;
+        font-weight: 950;
+      }
+
+      .brand-copy strong,
+      .brand-copy span {
+        display: block;
+      }
+
+      .brand-copy strong {
+        font-size: 0.96rem;
+      }
+
+      .brand-copy span {
+        margin-top: 2px;
+        color: #a9a0a9;
+        font-size: 0.78rem;
+      }
+
+      .top-actions,
+      .hero-actions,
+      .window-picker {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .button,
+      .link-button {
+        display: inline-flex;
+        min-height: 42px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 13px;
+        background: rgba(255, 255, 255, 0.075);
+        color: #f6f1e8;
+        cursor: pointer;
+        font-size: 0.88rem;
+        font-weight: 760;
+        padding: 10px 14px;
+        text-decoration: none;
+        transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+      }
+
+      .button:hover,
+      .link-button:hover {
+        border-color: rgba(255, 255, 255, 0.24);
+        background: rgba(255, 255, 255, 0.12);
+        transform: translateY(-1px);
+      }
+
+      .button:disabled {
+        cursor: wait;
+        opacity: 0.58;
+        transform: none;
+      }
+
+      .button.subtle {
+        border-color: transparent;
+        background: transparent;
+        color: #bdb4bb;
+      }
+
+      .hero {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 28px;
+        margin-bottom: 26px;
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: #ff947a;
+        font-size: 0.76rem;
+        font-weight: 850;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 730px;
+        margin: 0;
+        font-size: clamp(2.25rem, 5vw, 4.65rem);
+        letter-spacing: -0.045em;
+        line-height: 0.98;
+      }
+
+      .hero-copy {
+        max-width: 660px;
+        margin: 16px 0 0;
+        color: #bdb4bb;
+        font-size: 1.02rem;
+        line-height: 1.62;
+      }
+
+      .window-picker {
+        flex: 0 0 auto;
+        padding: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 15px;
+        background: rgba(0, 0, 0, 0.22);
+      }
+
+      .window-button {
+        min-width: 58px;
+        border-radius: 11px;
+        background: transparent;
+        color: #a9a0a9;
+        cursor: pointer;
+        font-size: 0.84rem;
+        font-weight: 820;
+        padding: 9px 12px;
+      }
+
+      .window-button.active {
+        background: #f6f1e8;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+        color: #17131b;
+      }
+
+      .status-row {
+        display: flex;
+        min-height: 25px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin: 0 0 16px;
+        color: #a9a0a9;
+        font-size: 0.82rem;
+      }
+
+      #dashboard-status.error {
+        color: #ffaf9b;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 22px;
+      }
+
+      .stat-card,
+      .panel {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.058);
+        box-shadow: 0 22px 60px rgba(0, 0, 0, 0.19);
+        backdrop-filter: blur(12px);
+      }
+
+      .stat-card {
+        min-height: 142px;
+        border-radius: 20px;
+        padding: 19px;
+      }
+
+      .stat-card.featured {
+        border-color: rgba(255, 117, 85, 0.25);
+        background: linear-gradient(145deg, rgba(255, 117, 85, 0.13), rgba(255, 255, 255, 0.055));
+      }
+
+      .stat-label {
+        margin: 0;
+        color: #aaa1a9;
+        font-size: 0.78rem;
+        font-weight: 760;
+        letter-spacing: 0.025em;
+      }
+
+      .stat-value {
+        margin: 13px 0 8px;
+        color: #fffaf2;
+        font-size: clamp(1.8rem, 3.1vw, 2.7rem);
+        font-variant-numeric: tabular-nums;
+        font-weight: 850;
+        letter-spacing: -0.045em;
+        line-height: 1;
+      }
+
+      .stat-detail {
+        min-height: 2.5em;
+        margin: 0;
+        color: #8f8790;
+        font-size: 0.75rem;
+        line-height: 1.45;
+      }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.55fr) minmax(290px, 0.75fr);
+        gap: 18px;
+      }
+
+      .panel {
+        min-width: 0;
+        border-radius: 22px;
+        padding: 21px;
+      }
+
+      .panel-heading {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 20px;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: 1.06rem;
+        letter-spacing: -0.012em;
+      }
+
+      .panel-heading p {
+        margin: 5px 0 0;
+        color: #8f8790;
+        font-size: 0.78rem;
+        line-height: 1.45;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: end;
+        gap: 13px;
+        color: #a9a0a9;
+        font-size: 0.75rem;
+      }
+
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .legend i {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+      }
+
+      .legend .views {
+        background: #ff7555;
+      }
+
+      .legend .searches {
+        background: #6f99ff;
+      }
+
+      .chart-wrap {
+        position: relative;
+        min-height: 255px;
+        overflow: hidden;
+      }
+
+      #trend-chart {
+        display: block;
+        width: 100%;
+        height: 255px;
+      }
+
+      .chart-empty {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #8f8790;
+        font-size: 0.84rem;
+        pointer-events: none;
+      }
+
+      .chart-empty[hidden] {
+        display: none;
+      }
+
+      .table-wrap {
+        max-height: 365px;
+        overflow: auto;
+        scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.78rem;
+        font-variant-numeric: tabular-nums;
+      }
+
+      th,
+      td {
+        padding: 11px 9px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #1a181f;
+        color: #8f8790;
+        font-size: 0.69rem;
+        letter-spacing: 0.025em;
+        text-transform: uppercase;
+      }
+
+      th:first-child,
+      td:first-child {
+        padding-left: 2px;
+        text-align: left;
+      }
+
+      th:last-child,
+      td:last-child {
+        padding-right: 2px;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+
+      tbody tr:hover td {
+        background: rgba(255, 255, 255, 0.025);
+      }
+
+      .empty-cell {
+        padding: 36px 8px;
+        color: #8f8790;
+        text-align: center;
+      }
+
+      .privacy-note {
+        display: flex;
+        gap: 11px;
+        margin-top: 18px;
+        padding-top: 17px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        color: #8f8790;
+        font-size: 0.75rem;
+        line-height: 1.5;
+      }
+
+      .privacy-icon {
+        flex: 0 0 auto;
+        color: #70d6ad;
+        font-weight: 900;
+      }
+
+      noscript {
+        display: block;
+        margin: 20px 0;
+        border: 1px solid rgba(255, 117, 85, 0.3);
+        border-radius: 14px;
+        padding: 14px;
+        color: #ffaf9b;
+      }
+
+      @media (max-width: 900px) {
+        .stats-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .content-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 660px) {
+        .shell {
+          width: min(100% - 22px, 1180px);
+          padding-top: 16px;
+        }
+
+        .topbar,
+        .hero {
+          align-items: stretch;
+        }
+
+        .topbar {
+          padding-bottom: 30px;
+        }
+
+        .brand-copy span,
+        .public-label {
+          display: none;
+        }
+
+        .hero {
+          flex-direction: column;
+        }
+
+        .hero-actions,
+        .window-picker {
+          width: 100%;
+        }
+
+        .window-button {
+          flex: 1;
+        }
+
+        .stats-grid {
+          gap: 9px;
+        }
+
+        .stat-card {
+          min-height: 132px;
+          padding: 16px;
+        }
+
+        .panel {
+          padding: 17px;
+        }
+
+        .panel-heading {
+          flex-direction: column;
+        }
+
+        .legend {
+          justify-content: start;
+        }
+
+        .status-row {
+          align-items: start;
+          flex-direction: column;
+          gap: 4px;
+        }
+      }
+
+      @media (max-width: 430px) {
+        .top-actions {
+          gap: 3px;
+        }
+
+        .button,
+        .link-button {
+          padding-inline: 10px;
+        }
+
+        .stats-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .stat-card {
+          min-height: 0;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Open the public Find Your Armenian app">
+          <span class="brand-mark" aria-hidden="true">FY</span>
+          <span class="brand-copy">
+            <strong>Find Your Armenian</strong>
+            <span>Private owner analytics</span>
+          </span>
+        </a>
+        <nav class="top-actions" aria-label="Owner actions">
+          <a class="link-button" href="/"><span class="public-label">Public app</span><span aria-hidden="true"> ↗</span></a>
+          <button class="button subtle" id="logout-button" type="button">Log out</button>
+        </nav>
+      </header>
+
+      <section class="hero" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">Owner dashboard</p>
+          <h1 id="page-title">Is this helping people?</h1>
+          <p class="hero-copy">A private, privacy-conscious view of pseudonymous browser reach, searches, outcomes, and source engagement.</p>
+        </div>
+        <div class="hero-actions">
+          <div class="window-picker" role="group" aria-label="Analytics window">
+            <button class="window-button" type="button" data-window="7" aria-pressed="false">7 days</button>
+            <button class="window-button active" type="button" data-window="30" aria-pressed="true">30 days</button>
+            <button class="window-button" type="button" data-window="90" aria-pressed="false">90 days</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="status-row">
+        <span id="dashboard-status" role="status" aria-live="polite">Loading analytics…</span>
+        <span id="generated-time">—</span>
+      </div>
+
+      <section class="stats-grid" aria-label="Usage totals">
+        <article class="stat-card featured">
+          <p class="stat-label">Unique browsers*</p>
+          <p class="stat-value" id="stat-visitors">—</p>
+          <p class="stat-detail" id="detail-visitors">Loading retained reach…</p>
+        </article>
+        <article class="stat-card">
+          <p class="stat-label">Page views</p>
+          <p class="stat-value" id="stat-views">—</p>
+          <p class="stat-detail" id="detail-views">Public app loads</p>
+        </article>
+        <article class="stat-card">
+          <p class="stat-label">Searches</p>
+          <p class="stat-value" id="stat-searches">—</p>
+          <p class="stat-detail" id="detail-searches">Searches admitted within the free limits</p>
+        </article>
+        <article class="stat-card">
+          <p class="stat-label">Source opens</p>
+          <p class="stat-value" id="stat-opens">—</p>
+          <p class="stat-detail" id="detail-opens">Result source links opened</p>
+        </article>
+        <article class="stat-card">
+          <p class="stat-label">Successful</p>
+          <p class="stat-value" id="stat-success">—</p>
+          <p class="stat-detail" id="detail-success">Searches that returned a result</p>
+        </article>
+        <article class="stat-card">
+          <p class="stat-label">No result</p>
+          <p class="stat-value" id="stat-no-results">—</p>
+          <p class="stat-detail" id="detail-no-results">Completed without a match</p>
+        </article>
+        <article class="stat-card">
+          <p class="stat-label">Failed</p>
+          <p class="stat-value" id="stat-failed">—</p>
+          <p class="stat-detail" id="detail-failed">Searches that ended with an error</p>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <article class="panel" aria-labelledby="trend-title">
+          <div class="panel-heading">
+            <div>
+              <h2 id="trend-title">Daily activity</h2>
+              <p id="trend-caption">Page views and searches in the selected window</p>
+            </div>
+            <div class="legend" aria-label="Chart legend">
+              <span><i class="views" aria-hidden="true"></i>Page views</span>
+              <span><i class="searches" aria-hidden="true"></i>Searches</span>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <svg id="trend-chart" role="img" aria-labelledby="trend-title trend-caption"></svg>
+            <p class="chart-empty" id="chart-empty" hidden>No activity in this window yet.</p>
+          </div>
+        </article>
+
+        <article class="panel" aria-labelledby="daily-title">
+          <div class="panel-heading">
+            <div>
+              <h2 id="daily-title">Day by day</h2>
+              <p>UTC dates · newest first</p>
+            </div>
+            <button class="button" id="refresh-button" type="button">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col">Browsers</th>
+                  <th scope="col">Views</th>
+                  <th scope="col">Searches</th>
+                  <th scope="col">Opens</th>
+                </tr>
+              </thead>
+              <tbody id="daily-body"></tbody>
+            </table>
+          </div>
+          <div class="privacy-note">
+            <span class="privacy-icon" aria-hidden="true">✓</span>
+            <span>Only aggregate counters and hashed random browser identifiers are used. Raw IP addresses, names, emails, queries, and user-agent strings are not collected by this analytics view.</span>
+          </div>
+        </article>
+      </section>
+
+      <noscript>This dashboard needs JavaScript to load private analytics.</noscript>
+    </main>
+    <script type="module" src="/admin/app.js"></script>
+  </body>
+</html>

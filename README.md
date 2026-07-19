@@ -40,9 +40,11 @@ npm start
 
 Open `http://localhost:3000`.
 
-For a password-protected local run, set both `AUTH_PASSWORD` and
-`AUTH_SESSION_SECRET`. Authentication is optional only in local development;
-production starts fail-closed when either value is missing.
+Set both `AUTH_PASSWORD` and `AUTH_SESSION_SECRET` to enable the private owner
+dashboard. Public search remains open; the password protects analytics, shared
+history, contacts, lead notes, and owner-only APIs. Admin authentication is
+optional only in local development; production starts fail-closed when either
+value is missing.
 
 ## Docker Run
 
@@ -84,14 +86,25 @@ APIFY_SURNAME_SEED_COUNT=0
 APIFY_COMPANY_EMPLOYEES_ENABLED=false
 APIFY_ENRICH_MAX_PROFILES=6
 GEMINI_ENABLED=true
+ANALYTICS_RETENTION_DAYS=90
+PUBLIC_SEARCHES_PER_VISITOR_PER_DAY=3
+PUBLIC_SEARCHES_GLOBAL_PER_DAY=25
+SEARCH_HISTORY_MAX_ENTRIES=500
+RAW_RUN_CACHE_MAX_FILES=500
 ```
 
 4. Generate a public domain and enable Railway Serverless/App Sleeping.
 
 Railway provides the public domain and healthcheck host automatically; both are
-added to the HTTP Host allowlist. `/api/health` and `/api/ready` remain public for
-platform probes, while the UI, contacts, history, notes, configuration, and paid
-search endpoints require a signed-in session. Never commit production secrets.
+added to the HTTP Host allowlist. The search UI and visitor-scoped async jobs are
+public. `/admin`, aggregate analytics, contacts, shared history, lead notes, the
+job list, and synchronous paid search remain owner-only. Never commit production
+secrets.
+
+Public searches are limited by an atomic persisted per-browser daily cap and a
+global daily cap. Public callers cannot force-refresh cached actor data. These
+limits are spend guards, not billing guarantees: `APIFY_MAX_TOTAL_CHARGE_USD` is
+still a ceiling per actor run rather than per complete search.
 
 The Git repository intentionally excludes `data/`, so a new Railway volume starts
 empty. Import existing local data only after authentication is enabled, and keep
@@ -108,6 +121,11 @@ AUTH_PASSWORD=
 AUTH_SESSION_SECRET=
 AUTH_SESSION_TTL_SECONDS=604800
 # AUTH_COOKIE_SECURE=true
+ANALYTICS_RETENTION_DAYS=90
+PUBLIC_SEARCHES_PER_VISITOR_PER_DAY=3
+PUBLIC_SEARCHES_GLOBAL_PER_DAY=25
+SEARCH_HISTORY_MAX_ENTRIES=500
+RAW_RUN_CACHE_MAX_FILES=500
 APIFY_TOKEN=
 APIFY_MODE=cache-first
 APIFY_MAX_RESULTS=8
@@ -141,21 +159,35 @@ Runtime data is written under `data/` and ignored by git:
 - `data/contacts.json`: durable contact intelligence cache with aliases, evidence, sources, and last matched query.
 - `data/profiles.json`: normalized people profiles.
 - `data/searches.json`: user query history, result IDs, and immutable result snapshots.
+- `data/analytics.json`: bounded daily aggregate usage counters plus hashes of
+  random pseudonymous browser IDs for unique counts and public rate enforcement.
 - `data/.sandbox/`: isolated demo/fixture state, never merged with live people.
 - `data/leads.json`: saved lead status and notes.
 
 On Railway, the same files live in the persistent volume at `/app/data`.
+Search history keeps the newest `SEARCH_HISTORY_MAX_ENTRIES` records. Raw actor
+cache files expire after seven days and are also capped by
+`RAW_RUN_CACHE_MAX_FILES`; stale cache files are removed during normal use.
 
 ## API
 
-- `POST /api/search` with `Content-Type: application/json` and `{ "query": "Find Armenians at OpenAI", "refresh": false }`
-- `GET /api/leads`
-- `POST /api/leads` with `Content-Type: application/json` and `{ "personId": "...", "status": "contacted", "notes": "..." }`
-- `GET /api/health`
-- `GET /api/ready` (503 when live discovery is not configured)
+Public:
 
-All routes except the two health probes and the login/logout flow require a
-valid session whenever authentication is enabled.
+- `POST /api/jobs` with `Content-Type: application/json` and `{ "query": "Find Armenians at OpenAI", "mode": "fast" }`
+- `GET /api/jobs/:id` and `DELETE /api/jobs/:id` for jobs owned by the same random browser cookie
+- `GET /api/config`, `GET /api/health`, and `GET /api/ready`
+- `POST /api/events/result-open` with an empty JSON object for optional aggregate click counting
+
+Owner session required:
+
+- `GET /api/admin/analytics`
+- `POST /api/search`, `GET /api/jobs`, and all `/api/searches`, `/api/contacts`, and `/api/leads` routes
+
+Public job responses recursively remove private lead objects, including owner
+status and notes. Pseudonymous analytics never accept query text, names, profile
+URLs, IP addresses, user-agent strings, or arbitrary event properties. Search
+queries and results are still stored separately for caching and product
+operation, and are visible only through owner-protected history APIs.
 
 ## Validation
 
@@ -172,6 +204,10 @@ The default benchmark is fully offline. It uses sanitized tracked fixtures, an i
 
 `cache-first` mode (the default) reuses both trusted contacts and cached actor runs. `APIFY_MAX_TOTAL_CHARGE_USD` is a ceiling for each actor run, not the whole multi-run search. Control aggregate exposure with the number of web/surname/enrichment runs as well as `APIFY_MAX_RESULTS` and `APIFY_ENRICH_MAX_PROFILES`; `APIFY_SURNAME_SEED_COUNT` is opt-in. Actual actor pricing can change, so check the actor pages before raising these limits.
 
+For a public deployment, `PUBLIC_SEARCHES_PER_VISITOR_PER_DAY` limits one
+browser identifier and `PUBLIC_SEARCHES_GLOBAL_PER_DAY` provides the hard daily
+backstop even if callers rotate cookies.
+
 ## Quick live check
 
 ```bash
@@ -183,7 +219,12 @@ Prints the ranked candidates with evidence, confidence, and Gemini's Armenian-co
 
 ## Next Steps
 
-- Before sharing the app with multiple independent users, partition saved data by user and replace the process-local JSON/job queue with a durable database/queue (Supabase is a reasonable free-tier option). The current password gate is designed for a single trusted owner or small trusted group.
+- Public search is visitor-isolated, but saved CRM/history data remains a single
+  owner workspace. Add real user accounts and partition that data before exposing
+  contacts, saved leads, or personal history to multiple independent users.
+- Replace the process-local job queue with a durable queue before running more
+  than one application replica. The current Railway deployment is designed for a
+  single sleeping/serverless replica with a persistent volume.
 - Keep the Telegram chat allowlist enabled; do not expose paid search commands to arbitrary bot users.
 - Resolve harvestapi's obfuscated `/in/ACw...` profile URLs to public vanity URLs before enrichment for broader enrichment coverage.
 - Add a named-person search path (exact-name templates + single-profile enrichment).

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sign in · Find Your Armenian</title>
+    <title>Owner sign in · Find Your Armenian</title>
     <style>
       :root {
         color-scheme: dark;
@@ -89,19 +89,33 @@
         min-height: 1.5em;
         margin: 4px 0 0;
       }
+
+      .public-link {
+        display: inline-block;
+        margin-top: 22px;
+        color: #cfc7bc;
+        font-size: 0.9rem;
+        text-decoration-color: rgba(207, 199, 188, 0.45);
+        text-underline-offset: 4px;
+      }
+
+      .public-link:hover {
+        color: #fff;
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1>Find Your Armenian</h1>
-      <p>This deployment is private. Enter its password to continue.</p>
+      <h1>Owner analytics</h1>
+      <p>The public app is open to everyone. This private area is for usage analytics and owner administration.</p>
       <form id="login-form">
         <label for="password">Password</label>
         <input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required autofocus />
         <button id="login-button" type="submit">Sign in</button>
         <p id="login-status" role="alert" aria-live="polite"></p>
       </form>
+      <a class="public-link" href="/">← Back to the public app</a>
     </main>
-    <script type="module" src="/login.js"></script>
+    <script type="module" src="/admin/login.js"></script>
   </body>
 </html>

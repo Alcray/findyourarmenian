@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { createSessionToken, verifySessionToken } from '../src/auth.js';
 import { config } from '../src/config.js';
@@ -26,7 +29,9 @@ function testConfig(overrides = {}) {
 }
 
 async function startTestServer(t, runtimeConfig = testConfig()) {
-  const server = createServer({ runtimeConfig });
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'find-your-armenian-auth-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const server = createServer({ runtimeConfig: { ...runtimeConfig, dataDir } });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => server.close());
@@ -42,17 +47,30 @@ async function login(baseUrl, password = PASSWORD, headers = {}) {
   });
 }
 
-test('hosted auth protects the UI and API while leaving health probes public', async (t) => {
+test('public search UI and config stay open while owner data and analytics stay private', async (t) => {
   const baseUrl = await startTestServer(t);
 
   const homepage = await fetch(baseUrl, { redirect: 'manual' });
-  assert.equal(homepage.status, 303);
-  assert.equal(homepage.headers.get('location'), '/login');
+  assert.equal(homepage.status, 200);
   assert.equal(homepage.headers.get('cache-control'), 'no-store');
 
-  const api = await fetch(`${baseUrl}/api/config`);
-  assert.equal(api.status, 401);
-  assert.deepEqual(await api.json(), { error: 'Authentication required.' });
+  const publicApi = await fetch(`${baseUrl}/api/config`);
+  assert.equal(publicApi.status, 200);
+  const publicBody = await publicApi.json();
+  assert.equal(publicBody.adminAuthEnabled, true);
+  assert.equal(publicBody.adminAuthenticated, false);
+  assert.equal(publicBody.pseudonymousAnalytics, true);
+  assert.match(publicApi.headers.get('set-cookie'), /^__Host-fya_visitor=/);
+
+  const adminPage = await fetch(`${baseUrl}/admin`, { redirect: 'manual' });
+  assert.equal(adminPage.status, 303);
+  assert.equal(adminPage.headers.get('location'), '/admin/login');
+
+  for (const route of ['/api/admin/analytics', '/api/jobs', '/api/searches', '/api/contacts', '/api/leads']) {
+    const response = await fetch(`${baseUrl}${route}`);
+    assert.equal(response.status, 401, route);
+    assert.deepEqual(await response.json(), { error: 'Admin authentication required.' });
+  }
 
   const health = await fetch(`${baseUrl}/api/health`);
   assert.equal(health.status, 200);
@@ -60,7 +78,7 @@ test('hosted auth protects the UI and API while leaving health probes public', a
   assert.equal(ready.status, 200);
 });
 
-test('login issues a secure signed cookie that permits same-origin access', async (t) => {
+test('login issues a secure signed cookie that unlocks only the owner area', async (t) => {
   const baseUrl = await startTestServer(t);
 
   const rejected = await login(baseUrl, 'incorrect password');
@@ -78,23 +96,27 @@ test('login issues a secure signed cookie that permits same-origin access', asyn
   assert.match(setCookie, /; Max-Age=3600/);
 
   const cookie = setCookie.split(';', 1)[0];
-  const configResponse = await fetch(`${baseUrl}/api/config`, { headers: { cookie } });
-  assert.equal(configResponse.status, 200);
-  assert.equal((await configResponse.json()).authEnabled, true);
-  const authenticatedHomepage = await fetch(baseUrl, { headers: { cookie } });
-  assert.equal(authenticatedHomepage.status, 200);
-  assert.equal(authenticatedHomepage.headers.get('cache-control'), 'no-store');
+  const analytics = await fetch(`${baseUrl}/api/admin/analytics`, { headers: { cookie } });
+  assert.equal(analytics.status, 200);
+  assert.equal((await analytics.json()).totals.searches, 0);
+  const adminPage = await fetch(`${baseUrl}/admin`, { headers: { cookie } });
+  assert.equal(adminPage.status, 200);
+  assert.equal(adminPage.headers.get('cache-control'), 'no-store');
 
-  const loginPage = await fetch(`${baseUrl}/login`, { headers: { cookie }, redirect: 'manual' });
+  const loginPage = await fetch(`${baseUrl}/admin/login`, { headers: { cookie }, redirect: 'manual' });
   assert.equal(loginPage.status, 303);
-  assert.equal(loginPage.headers.get('location'), '/');
+  assert.equal(loginPage.headers.get('location'), '/admin');
 
   const separator = cookie.indexOf('=');
   const token = cookie.slice(separator + 1);
   const replacement = token.endsWith('A') ? 'B' : 'A';
   const tampered = `${cookie.slice(0, separator + 1)}${token.slice(0, -1)}${replacement}`;
-  const tamperedResponse = await fetch(`${baseUrl}/api/config`, { headers: { cookie: tampered } });
+  const tamperedResponse = await fetch(`${baseUrl}/api/admin/analytics`, { headers: { cookie: tampered } });
   assert.equal(tamperedResponse.status, 401);
+
+  const stillPublic = await fetch(`${baseUrl}/api/config`, { headers: { cookie: tampered } });
+  assert.equal(stillPublic.status, 200);
+  assert.equal((await stillPublic.json()).adminAuthenticated, false);
 });
 
 test('logout clears the session cookie and cross-origin mutations are rejected', async (t) => {
@@ -124,8 +146,10 @@ test('logout clears the session cookie and cross-origin mutations are rejected',
   assert.equal(logout.headers.get('clear-site-data'), '"cache", "storage"');
 
   const clearedCookie = logout.headers.get('set-cookie').split(';', 1)[0];
-  const afterLogout = await fetch(`${baseUrl}/api/config`, { headers: { cookie: clearedCookie } });
+  const afterLogout = await fetch(`${baseUrl}/api/admin/analytics`, { headers: { cookie: clearedCookie } });
   assert.equal(afterLogout.status, 401);
+  const publicAfterLogout = await fetch(`${baseUrl}/api/config`, { headers: { cookie: clearedCookie } });
+  assert.equal(publicAfterLogout.status, 200);
 });
 
 test('signed sessions reject expiry and secret rotation', () => {
@@ -153,4 +177,34 @@ test('repeated login failures are throttled per client', async (t) => {
   const blocked = await login(baseUrl);
   assert.equal(blocked.status, 429);
   assert.ok(Number(blocked.headers.get('retry-after')) > 0);
+});
+
+test('trusted Railway client IP headers keep login throttles isolated', async (t) => {
+  const baseUrl = await startTestServer(t, testConfig({ authMaxFailures: 3, trustProxy: true }));
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await login(baseUrl, `incorrect-password-${attempt}`, { 'x-real-ip': '203.0.113.10' });
+    assert.equal(response.status, 401);
+  }
+
+  const blocked = await login(baseUrl, PASSWORD, { 'x-real-ip': '203.0.113.10' });
+  assert.equal(blocked.status, 429);
+  const otherClient = await login(baseUrl, PASSWORD, { 'x-real-ip': '203.0.113.11' });
+  assert.equal(otherClient.status, 200);
+});
+
+test('owner routes fail closed when admin credentials are not configured', async (t) => {
+  const baseUrl = await startTestServer(t, testConfig({
+    authPassword: '',
+    authSessionSecret: '',
+    authCookieSecure: false,
+  }));
+
+  assert.equal((await fetch(baseUrl)).status, 200);
+  assert.equal((await fetch(`${baseUrl}/api/config`)).status, 200);
+  assert.equal((await fetch(`${baseUrl}/api/admin/analytics`)).status, 401);
+
+  const admin = await fetch(`${baseUrl}/admin`, { redirect: 'manual' });
+  assert.equal(admin.status, 303);
+  assert.equal(admin.headers.get('location'), '/admin/login');
 });

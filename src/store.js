@@ -101,6 +101,32 @@ export async function saveRawRun(cacheKey, payload) {
     ...payload,
     cachedAt: nowIso(),
   });
+  await pruneRawRunCache();
+}
+
+async function pruneRawRunCache() {
+  const lockPath = path.join(paths.rawRuns, '.prune-lock');
+  return withFileLock(lockPath, async () => {
+    const entries = (await fs.readdir(paths.rawRuns, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'));
+    const files = (await Promise.all(entries.map(async (entry) => {
+      const filePath = path.join(paths.rawRuns, entry.name);
+      try {
+        const stat = await fs.stat(filePath);
+        return { filePath, modifiedAt: stat.mtimeMs };
+      } catch (error) {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      }
+    }))).filter(Boolean);
+    const cutoff = Date.now() - RAW_RUN_TTL_MS;
+    const expired = files.filter((file) => file.modifiedAt < cutoff);
+    const retained = files
+      .filter((file) => file.modifiedAt >= cutoff)
+      .sort((left, right) => right.modifiedAt - left.modifiedAt);
+    const overflow = retained.slice(config.rawRunCacheMaxFiles);
+    await Promise.all([...expired, ...overflow].map((file) => fs.rm(file.filePath, { force: true })));
+  });
 }
 
 export async function listProfiles() {
@@ -383,7 +409,7 @@ export async function saveSearch(search) {
         updatedAt: nowIso(),
         createdAt: search.createdAt || nowIso(),
       },
-    ];
+    ].slice(-config.searchHistoryMaxEntries);
     await writeJson(paths.searches, next);
   });
 }

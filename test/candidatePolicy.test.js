@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isFreshTrustedContact, shouldPersistAsContact } from '../src/candidatePolicy.js';
+import { contactToCandidate, isFreshTrustedContact, shouldPersistAsContact } from '../src/candidatePolicy.js';
 import { parseIntent } from '../src/people.js';
 
 const now = Date.parse('2026-07-19T12:00:00.000Z');
@@ -46,4 +46,29 @@ test('weak identity guesses are surfaced as possible but not auto-persisted as c
     }),
     true,
   );
+});
+
+test('reusable contact candidates do not carry a previous user query or query-specific judgment', () => {
+  const candidate = contactToCandidate({
+    id: 'contact_1',
+    name: 'Aram Hakobyan',
+    profileUrl: 'https://www.linkedin.com/in/aram-hakobyan',
+    lastMatchedQuery: 'private earlier founder search',
+    tags: ['OpenAI', 'private earlier founder search'],
+    outreachAngle: 'Mention the private earlier founder search',
+    geminiJudgment: { armenianConfidence: 'medium', rationale: 'Old query-specific judgment' },
+    sources: [{
+      kind: 'contact-cache',
+      snippet: 'Loaded from contact cache. Last matched: private earlier founder search',
+      query: 'private earlier founder search',
+    }],
+  });
+
+  assert.equal('lastMatchedQuery' in candidate, false);
+  assert.equal('tags' in candidate, false);
+  assert.equal('outreachAngle' in candidate, false);
+  assert.equal('geminiJudgment' in candidate, false);
+  assert.equal(candidate.sources[0].snippet, 'Loaded from the reusable contact cache.');
+  assert.equal(candidate.sources[0].query, 'contact cache lookup');
+  assert.equal(JSON.stringify(candidate).includes('private earlier founder search'), false);
 });

@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { searchPeople, savedLeadsWithProfiles } from './agent.js';
+import { createAnalyticsStore, getAnonymousVisitor } from './analytics.js';
 import {
   authEnabled,
   createLoginRateLimiter,
@@ -13,7 +14,13 @@ import {
   verifyPassword,
 } from './auth.js';
 import { config, publicConfig } from './config.js';
-import { deleteSearchJob, getSearchJob, listSearchJobs, startSearchJob } from './searchJobs.js';
+import {
+  deleteSearchJob,
+  findActiveSearchJob,
+  getSearchJob,
+  listSearchJobs,
+  startSearchJob,
+} from './searchJobs.js';
 import { getSearch, listContactsWithLeads, listLeads, listProfiles, listSearches, upsertLead } from './store.js';
 
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -31,12 +38,24 @@ const SECURITY_HEADERS = {
   'x-frame-options': 'DENY',
 };
 let activeSyncSearches = 0;
+const defaultSearchJobs = Object.freeze({
+  findActive: findActiveSearchJob,
+  start: startSearchJob,
+  get: getSearchJob,
+  list: listSearchJobs,
+  remove: deleteSearchJob,
+});
 
-export function createServer({ runtimeConfig = config } = {}) {
+export function createServer({ runtimeConfig = config, searchJobs = defaultSearchJobs } = {}) {
   const loginRateLimiter = createLoginRateLimiter({
     maxFailures: runtimeConfig.authMaxFailures,
     windowMs: runtimeConfig.authFailureWindowSeconds * 1000,
   });
+  const analytics = createAnalyticsStore({
+    dataDir: runtimeConfig.dataDir,
+    retentionDays: runtimeConfig.analyticsRetentionDays,
+  });
+  const optionalAnalyticsLimiter = createOptionalAnalyticsLimiter();
 
   return http.createServer(async (req, res) => {
     try {
@@ -44,23 +63,32 @@ export function createServer({ runtimeConfig = config } = {}) {
       const url = new URL(req.url || '/', 'http://localhost');
 
       if (isHealthCheck(req, url)) {
-        await handleApi(req, res, runtimeConfig);
+        await handleApi(req, res, runtimeConfig, {
+          analytics,
+          isAdmin: false,
+          optionalAnalyticsLimiter,
+          searchJobs,
+        });
         return;
       }
 
-      if (authEnabled(runtimeConfig)) {
-        const handled = await handleAuthRoute(req, res, url, runtimeConfig, loginRateLimiter);
-        if (handled) return;
+      const handled = await handleAuthRoute(req, res, url, runtimeConfig, loginRateLimiter);
+      if (handled) return;
 
-        if (!requestHasValidSession(req, runtimeConfig)) {
-          sendAuthenticationRequired(req, res);
-          return;
-        }
+      const isAdmin = authEnabled(runtimeConfig) && requestHasValidSession(req, runtimeConfig);
+      if (isAdminProtectedRequest(req, url) && !isAdmin) {
+        sendAdminAuthenticationRequired(req, res);
+        return;
       }
 
       assertSameOriginMutation(req);
       if (req.url?.startsWith('/api/')) {
-        await handleApi(req, res, runtimeConfig);
+        await handleApi(req, res, runtimeConfig, { analytics, isAdmin, optionalAnalyticsLimiter, searchJobs });
+        return;
+      }
+
+      if (isAdminPath(url.pathname)) {
+        await serveAdmin(req, res, url);
         return;
       }
 
@@ -90,8 +118,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === serverFile) {
   startServer();
 }
 
-async function handleApi(req, res, runtimeConfig = config) {
+async function handleApi(req, res, runtimeConfig = config, context = {}) {
   const url = new URL(req.url || '/', 'http://localhost');
+  const analytics = context.analytics || createAnalyticsStore({
+    dataDir: runtimeConfig.dataDir,
+    retentionDays: runtimeConfig.analyticsRetentionDays,
+  });
+  const isAdmin = Boolean(context.isAdmin);
+  const optionalAnalyticsLimiter = context.optionalAnalyticsLimiter || createOptionalAnalyticsLimiter();
+  const searchJobs = context.searchJobs || defaultSearchJobs;
 
   if (req.method === 'GET' && url.pathname === '/api/health') {
     sendJson(res, 200, { ok: true });
@@ -105,7 +140,33 @@ async function handleApi(req, res, runtimeConfig = config) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/config') {
-    sendJson(res, 200, publicConfig(runtimeConfig));
+    const visitor = anonymousVisitor(req, runtimeConfig);
+    if (!isAdmin && optionalAnalyticsAllowed(req) && optionalAnalyticsLimiter.allow(visitor.id)) {
+      await analytics.recordPageView(visitor.id);
+    }
+    sendJson(res, 200, {
+      ...publicConfig(runtimeConfig),
+      adminAuthenticated: isAdmin,
+    }, visitorHeaders(visitor));
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/analytics') {
+    sendJson(res, 200, {
+      ...(await analytics.getSummary()),
+      generatedAt: new Date().toISOString(),
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/events/result-open') {
+    const visitor = anonymousVisitor(req, runtimeConfig);
+    const body = await readBody(req, 256);
+    if (Object.keys(body).length) throw httpError(400, 'This analytics event does not accept properties.');
+    if (!isAdmin && optionalAnalyticsAllowed(req) && optionalAnalyticsLimiter.allow(visitor.id)) {
+      await analytics.recordResultOpen(visitor.id);
+    }
+    sendJson(res, 202, { ok: true }, visitorHeaders(visitor));
     return;
   }
 
@@ -130,29 +191,73 @@ async function handleApi(req, res, runtimeConfig = config) {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/jobs') {
+    const visitor = anonymousVisitor(req, runtimeConfig);
     const input = normalizeSearchInput(await readBody(req), runtimeConfig);
-    const job = startSearchJob(input);
-    sendJson(res, 202, { job });
+    const effectiveInput = isAdmin
+      ? input
+      : {
+          ...input,
+          refresh: false,
+          limit: Math.min(input.limit, clampInteger(runtimeConfig.apifyMaxResults, 1, 50, 12)),
+        };
+    let quota = null;
+
+    if (!isAdmin) {
+      if (input.refresh) {
+        throw httpError(403, 'Public searches reuse cached data when available. Refresh is reserved for the owner dashboard.');
+      }
+      const activeJob = searchJobs.findActive?.(effectiveInput, { ownerId: visitor.id });
+      if (activeJob) {
+        sendJson(res, 202, { job: activeJob, quota: null, deduplicated: true }, visitorHeaders(visitor));
+        return;
+      }
+      quota = await analytics.admitSearch(visitor.id, {
+        perVisitorLimit: runtimeConfig.publicSearchesPerVisitorPerDay,
+        globalLimit: runtimeConfig.publicSearchesGlobalPerDay,
+      });
+      if (!quota.allowed) {
+        const message = quota.reason === 'global'
+          ? 'The public search budget for today has been reached. Please try again tomorrow.'
+          : 'You have used today\'s free searches in this browser. Please try again tomorrow.';
+        sendJson(res, 429, { error: message, quota }, {
+          ...visitorHeaders(visitor),
+          'retry-after': String(quota.retryAfterSeconds),
+        });
+        return;
+      }
+    }
+
+    const job = searchJobs.start(effectiveInput, {
+      ownerId: visitor.id,
+      onSettled: isAdmin
+        ? undefined
+        : ({ outcome }) => analytics.recordSearchOutcome(visitor.id, outcome),
+    });
+    sendJson(res, 202, { job, quota }, visitorHeaders(visitor));
     return;
   }
 
   if (req.method === 'GET' && url.pathname === '/api/jobs') {
-    sendJson(res, 200, { jobs: listSearchJobs() });
+    sendJson(res, 200, { jobs: searchJobs.list({ isAdmin: true }) });
     return;
   }
 
   if (req.method === 'GET' && url.pathname.startsWith('/api/jobs/')) {
+    const visitor = anonymousVisitor(req, runtimeConfig);
     const jobId = decodePathId(url.pathname, '/api/jobs/');
-    const job = getSearchJob(jobId);
+    const job = searchJobs.get(jobId, { ownerId: visitor.id, isAdmin });
     if (!job) throw Object.assign(new Error('Job not found'), { statusCode: 404 });
-    sendJson(res, 200, { job });
+    sendJson(res, 200, { job }, visitorHeaders(visitor));
     return;
   }
 
   if (req.method === 'DELETE' && url.pathname.startsWith('/api/jobs/')) {
+    const visitor = anonymousVisitor(req, runtimeConfig);
     const jobId = decodePathId(url.pathname, '/api/jobs/');
-    deleteSearchJob(jobId);
-    sendJson(res, 200, { ok: true });
+    if (!searchJobs.remove(jobId, { ownerId: visitor.id, isAdmin })) {
+      throw Object.assign(new Error('Job not found'), { statusCode: 404 });
+    }
+    sendJson(res, 200, { ok: true }, visitorHeaders(visitor));
     return;
   }
 
@@ -210,15 +315,20 @@ async function handleApi(req, res, runtimeConfig = config) {
 
 async function handleAuthRoute(req, res, url, runtimeConfig, loginRateLimiter) {
   if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/login' || url.pathname === '/login.html')) {
+    sendRedirect(res, '/admin/login');
+    return true;
+  }
+
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/admin/login') {
     if (requestHasValidSession(req, runtimeConfig)) {
-      sendRedirect(res, '/');
+      sendRedirect(res, '/admin');
       return true;
     }
     await servePublicFile(req, res, 'login.html', { noStore: true });
     return true;
   }
 
-  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/login.js') {
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/admin/login.js') {
     await servePublicFile(req, res, 'login.js', { noStore: true });
     return true;
   }
@@ -267,12 +377,33 @@ function isHealthCheck(req, url) {
   return req.method === 'GET' && (url.pathname === '/api/health' || url.pathname === '/api/ready');
 }
 
-function sendAuthenticationRequired(req, res) {
+function sendAdminAuthenticationRequired(req, res) {
   if (!String(req.url || '').startsWith('/api/') && (req.method === 'GET' || req.method === 'HEAD')) {
-    sendRedirect(res, '/login');
+    sendRedirect(res, '/admin/login');
     return;
   }
-  sendJson(res, 401, { error: 'Authentication required.' });
+  sendJson(res, 401, { error: 'Admin authentication required.' });
+}
+
+function isAdminProtectedRequest(req, url) {
+  if (isAdminPath(url.pathname) && url.pathname !== '/admin/login' && url.pathname !== '/admin/login.js') {
+    return true;
+  }
+
+  if (url.pathname === '/api/search') return true;
+  if (url.pathname === '/api/jobs' && req.method === 'GET') return true;
+  return isPathWithin(url.pathname, '/api/admin')
+    || isPathWithin(url.pathname, '/api/searches')
+    || isPathWithin(url.pathname, '/api/contacts')
+    || isPathWithin(url.pathname, '/api/leads');
+}
+
+function isAdminPath(pathname) {
+  return pathname === '/admin' || pathname.startsWith('/admin/');
+}
+
+function isPathWithin(pathname, root) {
+  return pathname === root || pathname.startsWith(`${root}/`);
 }
 
 function sendRedirect(res, location) {
@@ -306,6 +437,8 @@ function assertSameOriginMutation(req) {
 
 function requestClientKey(req, runtimeConfig) {
   if (runtimeConfig.trustProxy) {
+    const realIp = String(req.headers['x-real-ip'] || '').trim();
+    if (realIp) return realIp.slice(0, 200);
     const forwardedFor = String(req.headers['x-forwarded-for'] || '')
       .split(',')
       .map((value) => value.trim())
@@ -314,6 +447,54 @@ function requestClientKey(req, runtimeConfig) {
     if (forwardedFor) return forwardedFor.slice(0, 200);
   }
   return String(req.socket.remoteAddress || 'unknown').slice(0, 200);
+}
+
+function anonymousVisitor(req, runtimeConfig) {
+  return getAnonymousVisitor(req, {
+    secure: runtimeConfig.authCookieSecure,
+    retentionDays: runtimeConfig.analyticsRetentionDays,
+  });
+}
+
+function visitorHeaders(visitor) {
+  return visitor?.setCookie ? { 'set-cookie': visitor.setCookie } : {};
+}
+
+function optionalAnalyticsAllowed(req) {
+  return String(req.headers['sec-gpc'] || '') !== '1'
+    && String(req.headers.dnt || '') !== '1';
+}
+
+function createOptionalAnalyticsLimiter({
+  windowMs = 60 * 1000,
+  maxPerVisitor = 15,
+  maxGlobal = 60,
+} = {}) {
+  const visitors = new Map();
+  let globalWindow = { count: 0, resetAt: 0 };
+
+  function current(entry, now) {
+    return entry?.resetAt > now ? entry : { count: 0, resetAt: now + windowMs };
+  }
+
+  return {
+    allow(visitorId, now = Date.now()) {
+      globalWindow = current(globalWindow, now);
+      const visitorWindow = current(visitors.get(visitorId), now);
+      if (globalWindow.count >= maxGlobal || visitorWindow.count >= maxPerVisitor) return false;
+
+      globalWindow.count += 1;
+      visitorWindow.count += 1;
+      visitors.set(visitorId, visitorWindow);
+      if (visitors.size > 5000) {
+        for (const [id, entry] of visitors) {
+          if (entry.resetAt <= now) visitors.delete(id);
+        }
+        while (visitors.size > 5000) visitors.delete(visitors.keys().next().value);
+      }
+      return true;
+    },
+  };
 }
 
 export async function readBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
@@ -384,6 +565,22 @@ async function serveStatic(req, res) {
     }
     throw error;
   }
+}
+
+async function serveAdmin(req, res, url) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    throw httpError(405, 'Method not allowed.');
+  }
+
+  if (url.pathname === '/admin' || url.pathname === '/admin/') {
+    await servePublicFile(req, res, 'admin.html', { noStore: true });
+    return;
+  }
+  if (url.pathname === '/admin/app.js') {
+    await servePublicFile(req, res, 'admin.js', { noStore: true });
+    return;
+  }
+  throw httpError(404, 'Not found.');
 }
 
 async function servePublicFile(req, res, fileName, { noStore = false } = {}) {

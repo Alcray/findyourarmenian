@@ -81,6 +81,9 @@ test('contact evidence stays company-specific and persisted duplicate IDs remain
   const {
     listContacts,
     listProfiles,
+    listSearches,
+    saveRawRun,
+    saveSearch,
     searchContacts,
     upsertContactsFromProfiles,
     upsertProfiles,
@@ -127,4 +130,25 @@ test('contact evidence stays company-specific and persisted duplicate IDs remain
     assert.deepEqual(new Set(profile.sources[0].affiliationCompanies), new Set(['OpenAI', 'Meta']));
   }
   assert.equal(fs.statSync(path.join(dataDir, 'profiles.json')).mode & 0o777, 0o600);
+
+  const { config } = await import('../src/config.js');
+  const previousHistoryLimit = config.searchHistoryMaxEntries;
+  const previousRawRunLimit = config.rawRunCacheMaxFiles;
+  try {
+    config.searchHistoryMaxEntries = 2;
+    await saveSearch({ searchKey: 'search_1', query: 'first' });
+    await saveSearch({ searchKey: 'search_2', query: 'second' });
+    await saveSearch({ searchKey: 'search_3', query: 'third' });
+    assert.deepEqual((await listSearches()).map((search) => search.searchKey), ['search_3', 'search_2']);
+
+    config.rawRunCacheMaxFiles = 2;
+    await saveRawRun('run_1', { items: [{ id: 1 }] });
+    await saveRawRun('run_2', { items: [{ id: 2 }] });
+    await saveRawRun('run_3', { items: [{ id: 3 }] });
+    const rawRunFiles = fs.readdirSync(path.join(dataDir, 'raw-runs')).filter((file) => file.endsWith('.json'));
+    assert.equal(rawRunFiles.length, 2);
+  } finally {
+    config.searchHistoryMaxEntries = previousHistoryLimit;
+    config.rawRunCacheMaxFiles = previousRawRunLimit;
+  }
 });
